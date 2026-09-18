@@ -2,9 +2,11 @@ package com.github.chirillkirkin.chichess
 
 import com.github.chirillkirkin.chichess.config.configureExposed
 import com.github.chirillkirkin.chichess.config.configureErrorHandling
+import com.github.chirillkirkin.chichess.config.configureGuestAuthentication
 import com.github.chirillkirkin.chichess.config.configureKoin
 import com.github.chirillkirkin.chichess.config.configureSerialization
 import com.github.chirillkirkin.chichess.config.configureWebsockets
+import com.github.chirillkirkin.chichess.session.configureGuestSessionRoutes
 import io.ktor.server.application.Application
 import io.ktor.server.engine.applicationEnvironment
 import io.ktor.server.engine.configure
@@ -30,7 +32,9 @@ fun main() {
 fun Application.module() {
     configureSerialization()
     configureErrorHandling()
-    configureKoin()
-    configureExposed()
+    val database = configureExposed()
+    configureKoin(database)
+    configureGuestAuthentication()
     configureWebsockets()
+    configureGuestSessionRoutes()
 }
