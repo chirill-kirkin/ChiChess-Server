@@ -1,6 +1,7 @@
 package com.github.chirillkirkin.chichess
 
 import com.github.chirillkirkin.chichess.config.configureExposed
+import com.github.chirillkirkin.chichess.config.configureErrorHandling
 import com.github.chirillkirkin.chichess.config.configureKoin
 import com.github.chirillkirkin.chichess.config.configureSerialization
 import com.github.chirillkirkin.chichess.config.configureWebsockets
@@ -28,6 +29,7 @@ fun main() {
 
 fun Application.module() {
     configureSerialization()
+    configureErrorHandling()
     configureKoin()
     configureExposed()
     configureWebsockets()
