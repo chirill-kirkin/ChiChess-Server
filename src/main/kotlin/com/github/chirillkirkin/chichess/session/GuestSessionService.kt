@@ -1,13 +1,14 @@
 package com.github.chirillkirkin.chichess.session
 
 import java.security.MessageDigest
-import java.security.SecureRandom
 import java.util.Base64
 import java.util.HexFormat
 import java.util.UUID
+import java.util.random.RandomGenerator
 import kotlinx.serialization.Serializable
 
-private const val TOKEN_BYTE_COUNT = 32
+internal const val TOKEN_BYTE_COUNT = 32
+private const val TOKEN_HASH_ALGORITHM = "SHA-256"
 
 @Serializable
 data class GuestSessionResponse(val sessionId: String, val token: String)
@@ -19,7 +20,7 @@ interface GuestSessionRepository {
 
 class GuestSessionService(
     private val repository: GuestSessionRepository,
-    private val secureRandom: SecureRandom = SecureRandom(),
+    private val secureRandom: RandomGenerator,
 ) {
     suspend fun create(): GuestSessionResponse {
         val tokenBytes = ByteArray(TOKEN_BYTE_COUNT).also(secureRandom::nextBytes)
@@ -33,5 +34,7 @@ class GuestSessionService(
         repository.findSessionIdByTokenHash(hashToken(token))
 
     private fun hashToken(token: String): String =
-        HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)))
+        HexFormat.of().formatHex(
+            MessageDigest.getInstance(TOKEN_HASH_ALGORITHM).digest(token.toByteArray(Charsets.UTF_8)),
+        )
 }

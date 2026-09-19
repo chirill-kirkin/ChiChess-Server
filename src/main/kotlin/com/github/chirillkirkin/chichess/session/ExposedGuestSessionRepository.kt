@@ -1,5 +1,6 @@
 package com.github.chirillkirkin.chichess.session
 
+import com.github.chirillkirkin.chichess.config.DATABASE_UUID_STRING_LENGTH
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -9,11 +10,10 @@ import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 
-private const val UUID_STRING_LENGTH = 36
 private const val SHA_256_HEX_LENGTH = 64
 
 internal object GuestSessions : Table("guest_sessions") {
-    val id = varchar("id", UUID_STRING_LENGTH)
+    val id = varchar("id", DATABASE_UUID_STRING_LENGTH)
     val tokenHash = varchar("token_hash", SHA_256_HEX_LENGTH).uniqueIndex()
 
     override val primaryKey = PrimaryKey(id)
