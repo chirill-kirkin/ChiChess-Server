@@ -1,5 +1,8 @@
 package com.github.chirillkirkin.chichess.di
 
+import com.github.chirillkirkin.chichess.game.ExposedGameRepository
+import com.github.chirillkirkin.chichess.game.GameRepository
+import com.github.chirillkirkin.chichess.game.GameService
 import com.github.chirillkirkin.chichess.session.ExposedGuestSessionRepository
 import com.github.chirillkirkin.chichess.session.GuestSessionRepository
 import com.github.chirillkirkin.chichess.session.GuestSessionService
@@ -13,4 +16,6 @@ fun appModule(database: Database) = module {
     single<RandomGenerator> { SecureRandom() }
     single<GuestSessionRepository> { ExposedGuestSessionRepository(get()) }
     single { GuestSessionService(get(), get()) }
+    single<GameRepository> { ExposedGameRepository(get()) }
+    single { GameService(get(), get()) }
 }
