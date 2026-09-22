@@ -2,6 +2,7 @@ package com.github.chirillkirkin.chichess.game
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -18,4 +19,14 @@ internal suspend fun HttpClient.postJoinGame(inviteCode: String, token: String? 
         token?.let(::bearerAuth)
         contentType(ContentType.Application.Json)
         setBody(Json.encodeToString(JoinGameRequest(inviteCode)))
+    }
+
+internal suspend fun HttpClient.getGame(gameId: String, token: String? = null): HttpResponse =
+    get("$GAME_ROUTE/$gameId") {
+        token?.let(::bearerAuth)
+    }
+
+internal suspend fun HttpClient.getGamesHistory(token: String? = null): HttpResponse =
+    get(GAMES_HISTORY_ROUTE) {
+        token?.let(::bearerAuth)
     }

@@ -40,14 +40,21 @@ class GameCreationTest {
 
             withDatabaseConnection(databaseUrl) { connection ->
                 val selectCreatedGame =
-                    "SELECT ${Games.creatorSessionId.name}, ${Games.inviteCode.name} " +
+                    "SELECT ${Games.whiteSessionId.name}, ${Games.blackSessionId.name}, " +
+                        "${Games.inviteCode.name}, ${Games.status.name}, ${Games.revision.name} " +
                         "FROM ${Games.tableName} WHERE ${Games.id.name} = ?"
                 connection.prepareStatement(selectCreatedGame).use { query ->
                     query.setString(1, firstGame.gameId)
                     query.executeQuery().use { rows ->
                         assertTrue(rows.next())
-                        assertEquals(session.sessionId, rows.getString(Games.creatorSessionId.name))
+                        val white = rows.getString(Games.whiteSessionId.name)
+                        val black = rows.getString(Games.blackSessionId.name)
+                        // The creator occupies exactly one randomly assigned color slot.
+                        assertEquals(session.sessionId, white ?: black)
+                        assertTrue(white == null || black == null)
                         assertEquals(firstGame.inviteCode, rows.getString(Games.inviteCode.name))
+                        assertEquals(GameStatus.WAITING_FOR_OPPONENT.name, rows.getString(Games.status.name))
+                        assertEquals(INITIAL_REVISION, rows.getLong(Games.revision.name))
                     }
                 }
             }

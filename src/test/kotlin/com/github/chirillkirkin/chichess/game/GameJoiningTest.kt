@@ -50,13 +50,20 @@ class GameJoiningTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(game.gameId, response.decodeJsonBody<JoinGameResponse>().gameId)
         withDatabaseConnection(game.databaseUrl) { connection ->
-            val selectJoinedPlayer =
-                "SELECT ${Games.joinedSessionId.name} FROM ${Games.tableName} WHERE ${Games.id.name} = ?"
-            connection.prepareStatement(selectJoinedPlayer).use { query ->
+            val selectJoinedGame =
+                "SELECT ${Games.whiteSessionId.name}, ${Games.blackSessionId.name}, " +
+                    "${Games.status.name}, ${Games.revision.name} " +
+                    "FROM ${Games.tableName} WHERE ${Games.id.name} = ?"
+            connection.prepareStatement(selectJoinedGame).use { query ->
                 query.setString(1, game.gameId)
                 query.executeQuery().use { rows ->
                     assertTrue(rows.next())
-                    assertEquals(joiningPlayer.sessionId, rows.getString(Games.joinedSessionId.name))
+                    val white = rows.getString(Games.whiteSessionId.name)
+                    val black = rows.getString(Games.blackSessionId.name)
+                    // Both color slots are filled: creator and joiner, one per color.
+                    assertEquals(setOf(game.creator.sessionId, joiningPlayer.sessionId), setOf(white, black))
+                    assertEquals(GameStatus.IN_PROGRESS.name, rows.getString(Games.status.name))
+                    assertEquals(INITIAL_REVISION + 1, rows.getLong(Games.revision.name))
                 }
             }
         }
