@@ -4,6 +4,7 @@ sqlite-jdbc = "3.50.2.0"
 koin = "4.2.2"
 kotlin = "2.4.0"
 logback = "1.5.37"
+chesslib = "1.3.4"
 
 [libraries]
 exposed-core = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposed" }
@@ -12,6 +13,7 @@ sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite-jdbc" }
 koin-ktor = { module = "io.insert-koin:koin-ktor", version.ref = "koin" }
 koin-loggerSlf4j = { module = "io.insert-koin:koin-logger-slf4j", version.ref = "koin" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+chesslib = { module = "com.github.bhlangonijr:chesslib", version.ref = "chesslib" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

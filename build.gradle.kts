@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.koin.ktor)
     implementation(libs.koin.loggerSlf4j)
     implementation(libs.logback.classic)
+    implementation(libs.chesslib)
 
     testImplementation(kotlin("test"))
     testImplementation(ktorLibs.server.testHost)
