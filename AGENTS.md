@@ -66,14 +66,18 @@ Fixed URL scheme (some endpoints not yet implemented):
 POST /sessions/guest        # -> sessionId + opaque Bearer token
 POST /game                  # create; -> gameId + 10-char invite code
 POST /game/join             # body {"inviteCode":"..."}; joins by invite code
-GET  /game/{id}             # not implemented
-GET  /games/history         # not implemented
+GET  /game/{id}             # -> GameSnapshot for a participant
+GET  /games/history         # -> caller's games as a GameSnapshot list
 WS   /game/{id}?token=...   # not implemented
 ```
 
 - `gameId` is the permanent identifier of a game; the invite code is only for the second
-  player to join.
-- Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED`. The second
-  player is set under a `joined_session_id IS NULL` guard (race protection).
-- Reserved future domain codes: `NOT_A_GAME_PARTICIPANT`, `GAME_NOT_READY`,
-  `GAME_FINISHED`, `REVISION_CONFLICT`, `ILLEGAL_MOVE`, `DUPLICATE_COMMAND`.
+  player to join. Colors (`white`/`black`) are assigned randomly.
+- `GameSnapshot` is the per-caller restore format: `yourColor`, `status`, `revision`,
+  `fen`, and `result`/`terminationReason` once finished.
+- Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED`. The joining
+  player fills the empty color slot under a `<color>_session_id IS NULL` guard (race protection).
+- Read errors: `GAME_NOT_FOUND` (404), `NOT_A_GAME_PARTICIPANT` (403).
+- Move/resign domain codes (surfaced once the WS move protocol lands): `NOT_YOUR_TURN`,
+  `ILLEGAL_MOVE`, `GAME_NOT_READY`, `GAME_FINISHED`.
+- Reserved for the WS command protocol: `REVISION_CONFLICT`, `DUPLICATE_COMMAND`.
