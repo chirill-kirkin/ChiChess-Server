@@ -76,7 +76,7 @@ fun Route.gameRoutes(games: GameService) {
     }
 }
 
-private fun parseUuidOrNull(value: String): UUID? =
+internal fun parseUuidOrNull(value: String): UUID? =
     try {
         UUID.fromString(value)
     } catch (_: IllegalArgumentException) {

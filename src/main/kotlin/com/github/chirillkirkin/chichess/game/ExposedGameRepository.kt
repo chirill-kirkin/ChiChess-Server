@@ -20,6 +20,7 @@ import org.jetbrains.exposed.v1.jdbc.update
 private const val GAME_ENUM_COLUMN_LENGTH = 32
 private const val FEN_COLUMN_LENGTH = 100
 private const val MOVE_UCI_COLUMN_LENGTH = 5
+private const val COMMAND_ID_COLUMN_LENGTH = 64
 
 internal object Games : Table("games") {
     val id = varchar("id", DATABASE_UUID_STRING_LENGTH)
@@ -46,6 +47,14 @@ internal object Moves : Table("moves") {
     val createdAt = long("created_at")
 
     override val primaryKey = PrimaryKey(gameId, ply)
+}
+
+internal object ProcessedCommands : Table("processed_commands") {
+    val gameId = varchar("game_id", DATABASE_UUID_STRING_LENGTH)
+    val commandId = varchar("command_id", COMMAND_ID_COLUMN_LENGTH)
+    val createdAt = long("created_at")
+
+    override val primaryKey = PrimaryKey(gameId, commandId)
 }
 
 class ExposedGameRepository(private val database: Database) : GameRepository {
@@ -127,9 +136,23 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
         }
     }
 
+    override suspend fun isCommandProcessed(gameId: UUID, commandId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            transaction(database) {
+                ProcessedCommands.selectAll()
+                    .where {
+                        (ProcessedCommands.gameId eq gameId.toString()) and
+                            (ProcessedCommands.commandId eq commandId)
+                    }
+                    .limit(1)
+                    .any()
+            }
+        }
+
     override suspend fun recordMove(
         gameId: UUID,
         movedBySessionId: UUID,
+        commandId: String,
         ply: Int,
         uci: String,
         fenAfter: String,
@@ -157,25 +180,37 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
                 it[Games.terminationReason] = terminationReason?.name
                 it[updatedAt] = now
             }
+            markCommandProcessed(gameKey, commandId, now)
         }
     }
 
     override suspend fun finishGame(
         gameId: UUID,
+        commandId: String,
         newRevision: Long,
         result: GameResult,
         terminationReason: TerminationReason,
     ): Unit = withContext(Dispatchers.IO) {
+        val gameKey = gameId.toString()
         val now = System.currentTimeMillis()
         transaction(database) {
-            Games.update({ Games.id eq gameId.toString() }) {
+            Games.update({ Games.id eq gameKey }) {
                 it[status] = GameStatus.FINISHED.name
                 it[revision] = newRevision
                 it[Games.result] = result.name
                 it[Games.terminationReason] = terminationReason.name
                 it[updatedAt] = now
             }
+            markCommandProcessed(gameKey, commandId, now)
         }
+    }
+}
+
+private fun markCommandProcessed(gameKey: String, commandId: String, now: Long) {
+    ProcessedCommands.insert {
+        it[gameId] = gameKey
+        it[ProcessedCommands.commandId] = commandId
+        it[createdAt] = now
     }
 }
 

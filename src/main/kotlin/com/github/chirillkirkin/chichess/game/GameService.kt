@@ -44,6 +44,8 @@ sealed interface GameSnapshotResult {
 
 sealed interface MoveResult {
     data class Applied(val snapshot: GameSnapshot) : MoveResult
+    data class RevisionConflict(val snapshot: GameSnapshot) : MoveResult
+    data class DuplicateCommand(val snapshot: GameSnapshot?) : MoveResult
     data object NotFound : MoveResult
     data object NotParticipant : MoveResult
     data object NotReady : MoveResult
@@ -57,9 +59,11 @@ interface GameRepository {
     suspend fun join(inviteCode: String, joiningSessionId: UUID): JoinGameResult
     suspend fun findById(gameId: UUID): Game?
     suspend fun findByParticipant(sessionId: UUID): List<Game>
+    suspend fun isCommandProcessed(gameId: UUID, commandId: String): Boolean
     suspend fun recordMove(
         gameId: UUID,
         movedBySessionId: UUID,
+        commandId: String,
         ply: Int,
         uci: String,
         fenAfter: String,
@@ -70,6 +74,7 @@ interface GameRepository {
     )
     suspend fun finishGame(
         gameId: UUID,
+        commandId: String,
         newRevision: Long,
         result: GameResult,
         terminationReason: TerminationReason,
@@ -91,7 +96,9 @@ class GameService(
     private val repository: GameRepository,
     private val secureRandom: RandomGenerator,
     private val engine: ChessEngine,
+    private val locks: GameLocks,
 ) {
+
     suspend fun create(creatorSessionId: UUID): CreateGameResponse {
         val gameId = UUID.randomUUID()
         val inviteCode = buildString(INVITE_CODE_LENGTH) {
@@ -118,23 +125,36 @@ class GameService(
             game.colorOf(sessionId)?.let(game::snapshotFor)
         }
 
-    suspend fun applyMove(gameId: UUID, sessionId: UUID, uci: String): MoveResult {
-        val game = repository.findById(gameId) ?: return MoveResult.NotFound
-        val color = game.colorOf(sessionId) ?: return MoveResult.NotParticipant
+    suspend fun submitMove(
+        gameId: UUID,
+        sessionId: UUID,
+        commandId: String,
+        expectedRevision: Long,
+        uci: String,
+    ): MoveResult = locks.withGameLock(gameId) {
+        if (repository.isCommandProcessed(gameId, commandId)) {
+            return@withGameLock MoveResult.DuplicateCommand(snapshotFor(gameId, sessionId))
+        }
+        val game = repository.findById(gameId) ?: return@withGameLock MoveResult.NotFound
+        val color = game.colorOf(sessionId) ?: return@withGameLock MoveResult.NotParticipant
         when (game.status) {
-            GameStatus.FINISHED -> return MoveResult.GameFinished
-            GameStatus.WAITING_FOR_OPPONENT -> return MoveResult.NotReady
+            GameStatus.FINISHED -> return@withGameLock MoveResult.GameFinished
+            GameStatus.WAITING_FOR_OPPONENT -> return@withGameLock MoveResult.NotReady
             GameStatus.IN_PROGRESS -> Unit
         }
-        if (engine.sideToMove(game.fen) != color) return MoveResult.NotYourTurn
+        if (game.revision != expectedRevision) {
+            return@withGameLock MoveResult.RevisionConflict(game.snapshotFor(color))
+        }
+        if (engine.sideToMove(game.fen) != color) return@withGameLock MoveResult.NotYourTurn
         val outcome = engine.applyMove(game.fen, uci)
-        if (outcome !is MoveOutcome.Applied) return MoveResult.IllegalMove
+        if (outcome !is MoveOutcome.Applied) return@withGameLock MoveResult.IllegalMove
 
         val newRevision = game.revision + 1
         val newStatus = if (outcome.result != null) GameStatus.FINISHED else GameStatus.IN_PROGRESS
         repository.recordMove(
             gameId = gameId,
             movedBySessionId = sessionId,
+            commandId = commandId,
             ply = engine.plyNumber(outcome.fenAfter),
             uci = uci,
             fenAfter = outcome.fenAfter,
@@ -150,26 +170,36 @@ class GameService(
             result = outcome.result,
             terminationReason = outcome.terminationReason,
         )
-        return MoveResult.Applied(updated.snapshotFor(color))
+        MoveResult.Applied(updated.snapshotFor(color))
     }
 
-    suspend fun resign(gameId: UUID, sessionId: UUID): MoveResult {
-        val game = repository.findById(gameId) ?: return MoveResult.NotFound
-        val color = game.colorOf(sessionId) ?: return MoveResult.NotParticipant
-        when (game.status) {
-            GameStatus.FINISHED -> return MoveResult.GameFinished
-            GameStatus.WAITING_FOR_OPPONENT -> return MoveResult.NotReady
-            GameStatus.IN_PROGRESS -> Unit
+    // Resignation is unconditional, so it does not check expectedRevision — only that the game is in progress.
+    suspend fun submitResign(gameId: UUID, sessionId: UUID, commandId: String): MoveResult =
+        locks.withGameLock(gameId) {
+            if (repository.isCommandProcessed(gameId, commandId)) {
+                return@withGameLock MoveResult.DuplicateCommand(snapshotFor(gameId, sessionId))
+            }
+            val game = repository.findById(gameId) ?: return@withGameLock MoveResult.NotFound
+            val color = game.colorOf(sessionId) ?: return@withGameLock MoveResult.NotParticipant
+            when (game.status) {
+                GameStatus.FINISHED -> return@withGameLock MoveResult.GameFinished
+                GameStatus.WAITING_FOR_OPPONENT -> return@withGameLock MoveResult.NotReady
+                GameStatus.IN_PROGRESS -> Unit
+            }
+            val result = if (color == PieceColor.WHITE) GameResult.BLACK_WON else GameResult.WHITE_WON
+            val newRevision = game.revision + 1
+            repository.finishGame(gameId, commandId, newRevision, result, TerminationReason.RESIGNATION)
+            val updated = game.copy(
+                status = GameStatus.FINISHED,
+                revision = newRevision,
+                result = result,
+                terminationReason = TerminationReason.RESIGNATION,
+            )
+            MoveResult.Applied(updated.snapshotFor(color))
         }
-        val result = if (color == PieceColor.WHITE) GameResult.BLACK_WON else GameResult.WHITE_WON
-        val newRevision = game.revision + 1
-        repository.finishGame(gameId, newRevision, result, TerminationReason.RESIGNATION)
-        val updated = game.copy(
-            status = GameStatus.FINISHED,
-            revision = newRevision,
-            result = result,
-            terminationReason = TerminationReason.RESIGNATION,
-        )
-        return MoveResult.Applied(updated.snapshotFor(color))
+
+    private suspend fun snapshotFor(gameId: UUID, sessionId: UUID): GameSnapshot? {
+        val game = repository.findById(gameId) ?: return null
+        return game.colorOf(sessionId)?.let(game::snapshotFor)
     }
 }

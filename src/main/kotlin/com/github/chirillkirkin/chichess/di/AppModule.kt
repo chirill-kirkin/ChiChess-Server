@@ -3,6 +3,8 @@ package com.github.chirillkirkin.chichess.di
 import com.github.chirillkirkin.chichess.game.ChessEngine
 import com.github.chirillkirkin.chichess.game.ChesslibEngine
 import com.github.chirillkirkin.chichess.game.ExposedGameRepository
+import com.github.chirillkirkin.chichess.game.GameConnections
+import com.github.chirillkirkin.chichess.game.GameLocks
 import com.github.chirillkirkin.chichess.game.GameRepository
 import com.github.chirillkirkin.chichess.game.GameService
 import com.github.chirillkirkin.chichess.session.ExposedGuestSessionRepository
@@ -20,5 +22,7 @@ fun appModule(database: Database) = module {
     single { GuestSessionService(get(), get()) }
     single<GameRepository> { ExposedGameRepository(get()) }
     single<ChessEngine> { ChesslibEngine() }
-    single { GameService(get(), get(), get()) }
+    single { GameConnections() }
+    single { GameLocks() }
+    single { GameService(get(), get(), get(), get()) }
 }
