@@ -58,9 +58,7 @@ Feature code follows the `service` / `repository` / `routes` split per feature p
 - Only `.DS_Store` is left untracked in the repo; do not add or remove it without a
   separate request.
 
-## HTTP/WS contract
-
-Fixed URL scheme (some endpoints not yet implemented):
+## HTTP contract
 
 ```
 POST /sessions/guest        # -> sessionId + opaque Bearer token
@@ -68,7 +66,6 @@ POST /game                  # create; -> gameId + 10-char invite code
 POST /game/join             # body {"inviteCode":"..."}; joins by invite code
 GET  /game/{id}             # -> GameSnapshot for a participant
 GET  /games/history         # -> caller's games as a GameSnapshot list
-WS   /game/{id}?token=...   # not implemented
 ```
 
 - `gameId` is the permanent identifier of a game; the invite code is only for the second
@@ -78,6 +75,26 @@ WS   /game/{id}?token=...   # not implemented
 - Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED`. The joining
   player fills the empty color slot under a `<color>_session_id IS NULL` guard (race protection).
 - Read errors: `GAME_NOT_FOUND` (404), `NOT_A_GAME_PARTICIPANT` (403).
-- Move/resign domain codes (surfaced once the WS move protocol lands): `NOT_YOUR_TURN`,
-  `ILLEGAL_MOVE`, `GAME_NOT_READY`, `GAME_FINISHED`.
-- Reserved for the WS command protocol: `REVISION_CONFLICT`, `DUPLICATE_COMMAND`.
+
+## WebSocket protocol
+
+```
+WS   /game/{id}?token=...    # live game channel for a participant
+```
+
+- Auth: `token` is passed as a query parameter (WebSocket carries no bearer header).
+  Non-participant / unknown game / bad token close the socket with an application close
+  code (`4401` unauthorized, `4403` not a participant, `4404` not found) whose reason is
+  the domain code.
+- Messages are JSON with a `"type"` discriminator. Every command carries `protocolVersion`
+  and `commandId`.
+- Commands (client -> server): `REQUEST_SYNC`; `MAKE_MOVE` (`expectedRevision`, `uci`);
+  `RESIGN` (`expectedRevision`, ignored — resignation is unconditional).
+- Events (server -> client): `SNAPSHOT` (on connect and `REQUEST_SYNC`); `PLAYER_JOINED`
+  (a participant connected); `MOVE_APPLIED` and `GAME_FINISHED` (color-neutral state
+  deltas, broadcast to all); `COMMAND_REJECTED` (`code`, to the sender).
+- Mutations run under a per-game lock; `expectedRevision != revision` -> `COMMAND_REJECTED`
+  (`REVISION_CONFLICT`) plus a fresh `SNAPSHOT`. A repeated `commandId` (recorded atomically
+  with the move) is idempotent: the sender just receives the current `SNAPSHOT`.
+- Command error codes: `UNSUPPORTED_PROTOCOL_VERSION`, `MALFORMED_COMMAND`, `NOT_YOUR_TURN`,
+  `ILLEGAL_MOVE`, `GAME_NOT_READY`, `GAME_FINISHED`, `REVISION_CONFLICT`.
