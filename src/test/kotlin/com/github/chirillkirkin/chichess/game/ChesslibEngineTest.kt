@@ -61,6 +61,26 @@ class ChesslibEngineTest {
     }
 
     @Test
+    fun `applyMove detects a draw by insufficient material`() {
+        val outcome = assertIs<MoveOutcome.Applied>(
+            engine.applyMove(INSUFFICIENT_MATERIAL_FEN, INSUFFICIENT_MATERIAL_MOVE),
+        )
+
+        assertEquals(GameResult.DRAW, outcome.result)
+        assertEquals(TerminationReason.INSUFFICIENT_MATERIAL, outcome.terminationReason)
+    }
+
+    @Test
+    fun `applyMove detects the seventy-five move rule`() {
+        val outcome = assertIs<MoveOutcome.Applied>(
+            engine.applyMove(SEVENTY_FIVE_MOVE_FEN, SEVENTY_FIVE_MOVE_TRIGGER),
+        )
+
+        assertEquals(GameResult.DRAW, outcome.result)
+        assertEquals(TerminationReason.SEVENTY_FIVE_MOVE_RULE, outcome.terminationReason)
+    }
+
+    @Test
     fun `applyMove accepts a promotion`() {
         val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(PROMOTION_FEN, PROMOTION_MOVE))
 

@@ -19,6 +19,14 @@ internal const val STALEMATE_IN_ONE_FEN = "7k/5K2/8/8/8/8/8/6Q1 w - - 0 1"
 // White pawn one square from promotion, kings out of the way.
 internal const val PROMOTION_FEN = "k7/7P/8/8/8/8/8/7K w - - 0 1"
 
+// White king one move from capturing black's last knight, leaving king vs king.
+internal const val INSUFFICIENT_MATERIAL_FEN = "k7/8/1n6/2K5/8/8/8/8 w - - 0 1"
+internal const val INSUFFICIENT_MATERIAL_MOVE = "c5b6"
+
+// Half-move clock at 149; a quiet rook move reaches 150 (the 75-move rule) with material still on.
+internal const val SEVENTY_FIVE_MOVE_FEN = "r6k/8/8/8/8/8/8/2R4K w - - 149 80"
+internal const val SEVENTY_FIVE_MOVE_TRIGGER = "c1c2"
+
 // Command identifiers are client-generated; the values are arbitrary but distinct per role.
 internal const val MOVE_COMMAND_ID = "move-1"
 internal const val SYNC_COMMAND_ID = "sync-1"

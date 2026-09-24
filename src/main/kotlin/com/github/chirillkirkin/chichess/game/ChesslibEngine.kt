@@ -33,16 +33,26 @@ class ChesslibEngine : ChessEngine {
     private fun boardFrom(fen: String): Board = Board().apply { loadFromFen(fen) }
 }
 
+// FIDE's 75-move rule ends the game automatically after 150 half-moves without progress.
+private const val SEVENTY_FIVE_MOVE_RULE_PLIES = 150
+
 private fun Side.toPieceColor(): PieceColor = if (this == Side.WHITE) PieceColor.WHITE else PieceColor.BLACK
 
 private fun Board.result(): GameResult? = when {
     isMated -> if (sideToMove == Side.WHITE) GameResult.BLACK_WON else GameResult.WHITE_WON
-    isStaleMate || isDraw -> GameResult.DRAW
+    autoDrawReason() != null -> GameResult.DRAW
     else -> null
 }
 
-private fun Board.terminationReason(): TerminationReason? = when {
-    isMated -> TerminationReason.CHECKMATE
+private fun Board.terminationReason(): TerminationReason? =
+    if (isMated) TerminationReason.CHECKMATE else autoDrawReason()
+
+// Draws the server settles automatically. The 50-move rule is a claim (handled elsewhere), and
+// repetition needs the move history, which a single loaded position does not carry — so neither
+// is decided here.
+private fun Board.autoDrawReason(): TerminationReason? = when {
     isStaleMate -> TerminationReason.STALEMATE
+    isInsufficientMaterial -> TerminationReason.INSUFFICIENT_MATERIAL
+    halfMoveCounter >= SEVENTY_FIVE_MOVE_RULE_PLIES -> TerminationReason.SEVENTY_FIVE_MOVE_RULE
     else -> null
 }

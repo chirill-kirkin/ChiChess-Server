@@ -13,7 +13,13 @@ enum class GameStatus { WAITING_FOR_OPPONENT, IN_PROGRESS, FINISHED }
 enum class GameResult { WHITE_WON, BLACK_WON, DRAW }
 
 @Serializable
-enum class TerminationReason { CHECKMATE, STALEMATE, RESIGNATION }
+enum class TerminationReason {
+    CHECKMATE,
+    STALEMATE,
+    RESIGNATION,
+    INSUFFICIENT_MATERIAL,
+    SEVENTY_FIVE_MOVE_RULE,
+}
 
 data class Game(
     val id: UUID,
