@@ -15,6 +15,13 @@ private const val SHORTEST_REPETITION_CYCLE_PLIES = 4
 internal const val MIN_PLIES_FOR_FIVEFOLD =
     (FIVEFOLD_REPETITION_OCCURRENCES - 1) * SHORTEST_REPETITION_CYCLE_PLIES
 
+// A threefold repetition needs two such cycles; same short-circuit for the claim path.
+internal const val MIN_PLIES_FOR_THREEFOLD =
+    (THREEFOLD_REPETITION_OCCURRENCES - 1) * SHORTEST_REPETITION_CYCLE_PLIES
+
+// 50 moves without a capture or pawn move — the half-move clock counts plies, so 50 * 2.
+internal const val FIFTY_MOVE_RULE_PLIES = 100
+
 @Serializable
 data class CreateGameResponse(val gameId: String, val inviteCode: String)
 
@@ -63,6 +70,7 @@ sealed interface MoveResult {
     data object GameFinished : MoveResult
     data object NoDrawOffer : MoveResult
     data object DrawAlreadyOffered : MoveResult
+    data object DrawNotClaimable : MoveResult
 }
 
 interface GameRepository {
@@ -251,6 +259,39 @@ class GameService(
                 MoveResult.Applied(game.copy(drawOfferedBy = null).snapshotFor(color))
             }
         }
+
+    suspend fun claimDraw(gameId: UUID, sessionId: UUID, commandId: String, expectedRevision: Long): MoveResult =
+        locks.withGameLock(gameId) {
+            withActiveParticipant(gameId, sessionId, commandId) { game, color ->
+                if (game.revision != expectedRevision) {
+                    return@withActiveParticipant MoveResult.RevisionConflict(game.snapshotFor(color))
+                }
+                val reason = claimableDrawReason(gameId, game.fen)
+                    ?: return@withActiveParticipant MoveResult.DrawNotClaimable
+                val newRevision = game.revision + 1
+                repository.finishGame(gameId, commandId, newRevision, GameResult.DRAW, reason)
+                val updated = game.copy(
+                    status = GameStatus.FINISHED,
+                    revision = newRevision,
+                    drawOfferedBy = null,
+                    result = GameResult.DRAW,
+                    terminationReason = reason,
+                )
+                MoveResult.Applied(updated.snapshotFor(color))
+            }
+        }
+
+    // Which draw the current position lets a player claim, if any (threefold first, then 50-move).
+    private suspend fun claimableDrawReason(gameId: UUID, fen: String): TerminationReason? {
+        val clock = engine.halfMoveClock(fen)
+        return when {
+            clock >= MIN_PLIES_FOR_THREEFOLD &&
+                engine.isRepetition(repository.movesOf(gameId), THREEFOLD_REPETITION_OCCURRENCES) ->
+                TerminationReason.THREEFOLD_REPETITION
+            clock >= FIFTY_MOVE_RULE_PLIES -> TerminationReason.FIFTY_MOVE_RULE
+            else -> null
+        }
+    }
 
     // Common preamble for a mutating command: dedup, load the game, and require an in-progress participant.
     private suspend fun withActiveParticipant(

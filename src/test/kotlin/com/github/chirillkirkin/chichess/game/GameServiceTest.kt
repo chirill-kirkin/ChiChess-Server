@@ -171,7 +171,7 @@ class GameServiceTest {
         val repository = FakeGameRepository()
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
-        val engine = AlwaysRepeatingEngine(halfMoveClock = MIN_PLIES_FOR_FIVEFOLD)
+        val engine = StubEngine(halfMoveClock = MIN_PLIES_FOR_FIVEFOLD)
 
         val applied = assertIs<MoveResult.Applied>(
             service(repository, engine).submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE),
@@ -187,7 +187,7 @@ class GameServiceTest {
         val repository = FakeGameRepository()
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
-        val engine = AlwaysRepeatingEngine(halfMoveClock = MIN_PLIES_FOR_FIVEFOLD - 1)
+        val engine = StubEngine(halfMoveClock = MIN_PLIES_FOR_FIVEFOLD - 1)
 
         val applied = assertIs<MoveResult.Applied>(
             service(repository, engine).submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE),
@@ -291,6 +291,62 @@ class GameServiceTest {
     }
 
     @Test
+    fun `claiming a draw by threefold repetition finishes the game`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val engine = StubEngine(halfMoveClock = MIN_PLIES_FOR_THREEFOLD, repeats = true)
+
+        val applied = assertIs<MoveResult.Applied>(
+            service(repository, engine).claimDraw(game.id, white, CLAIM_COMMAND_ID, INITIAL_REVISION),
+        )
+
+        assertEquals(GameStatus.FINISHED, applied.snapshot.status)
+        assertEquals(GameResult.DRAW, applied.snapshot.result)
+        assertEquals(TerminationReason.THREEFOLD_REPETITION, applied.snapshot.terminationReason)
+    }
+
+    @Test
+    fun `claiming a draw by the fifty-move rule finishes the game`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val engine = StubEngine(halfMoveClock = FIFTY_MOVE_RULE_PLIES, repeats = false)
+
+        val applied = assertIs<MoveResult.Applied>(
+            service(repository, engine).claimDraw(game.id, white, CLAIM_COMMAND_ID, INITIAL_REVISION),
+        )
+
+        assertEquals(GameResult.DRAW, applied.snapshot.result)
+        assertEquals(TerminationReason.FIFTY_MOVE_RULE, applied.snapshot.terminationReason)
+    }
+
+    @Test
+    fun `claiming a draw with no grounds is rejected`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val engine = StubEngine(halfMoveClock = 0, repeats = false)
+
+        val result = service(repository, engine).claimDraw(game.id, white, CLAIM_COMMAND_ID, INITIAL_REVISION)
+
+        assertTrue(result is MoveResult.DrawNotClaimable)
+    }
+
+    @Test
+    fun `claiming a draw with a stale revision is rejected`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val engine = StubEngine(halfMoveClock = FIFTY_MOVE_RULE_PLIES)
+
+        val result = service(repository, engine)
+            .claimDraw(game.id, white, CLAIM_COMMAND_ID, INITIAL_REVISION + STALE_REVISION_OFFSET)
+
+        assertTrue(result is MoveResult.RevisionConflict)
+    }
+
+    @Test
     fun `submitResign rejects a game still waiting for an opponent`() = runBlocking {
         val repository = FakeGameRepository()
         val service = service(repository)
@@ -301,15 +357,17 @@ class GameServiceTest {
     }
 }
 
-// Reports every position as a fivefold repetition, isolating the service's repetition wiring.
-// The half-move clock is configurable so the fivefold gate can be exercised in both directions.
-private class AlwaysRepeatingEngine(private val halfMoveClock: Int) : ChessEngine {
+// Configurable half-move clock and repetition, isolating the service's draw-detection wiring.
+private class StubEngine(
+    private val halfMoveClock: Int,
+    private val repeats: Boolean = true,
+) : ChessEngine {
     override fun sideToMove(fen: String): PieceColor = PieceColor.WHITE
     override fun plyNumber(fen: String): Int = 1
     override fun applyMove(fen: String, uci: String): MoveOutcome =
         MoveOutcome.Applied(fenAfter = START_FEN, result = null, terminationReason = null)
     override fun halfMoveClock(fen: String): Int = halfMoveClock
-    override fun isRepetition(moves: List<String>, occurrences: Int): Boolean = true
+    override fun isRepetition(moves: List<String>, occurrences: Int): Boolean = repeats
 }
 
 private class FakeGameRepository : GameRepository {

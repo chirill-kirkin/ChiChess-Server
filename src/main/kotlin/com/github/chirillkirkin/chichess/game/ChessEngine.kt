@@ -4,6 +4,7 @@ const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 // A position occurring five times is an automatic draw (FIDE 9.6); three times is only claimable.
 const val FIVEFOLD_REPETITION_OCCURRENCES = 5
+const val THREEFOLD_REPETITION_OCCURRENCES = 3
 
 interface ChessEngine {
     fun sideToMove(fen: String): PieceColor

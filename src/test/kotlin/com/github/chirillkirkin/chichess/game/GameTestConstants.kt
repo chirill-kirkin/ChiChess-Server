@@ -30,7 +30,7 @@ internal const val SEVENTY_FIVE_MOVE_TRIGGER = "c1c2"
 // Both knights out and back returns to the starting position, which recurs once per round.
 internal val KNIGHT_SHUFFLE_ROUND = listOf("g1f3", "g8f6", "f3g1", "f6g8")
 internal const val FIVEFOLD_REPETITION_ROUNDS = 4 // start position occurs five times
-internal const val BELOW_FIVEFOLD_ROUNDS = 2
+internal const val THREEFOLD_REPETITION_ROUNDS = 2 // start position occurs three times
 
 // Command identifiers are client-generated; the values are arbitrary but distinct per role.
 internal const val MOVE_COMMAND_ID = "move-1"
@@ -40,6 +40,7 @@ internal const val DUPLICATE_COMMAND_ID = "dup-1"
 internal const val OFFER_COMMAND_ID = "offer-1"
 internal const val ACCEPT_COMMAND_ID = "accept-1"
 internal const val DECLINE_COMMAND_ID = "decline-1"
+internal const val CLAIM_COMMAND_ID = "claim-1"
 internal const val SECOND_COMMAND_ID = "cmd-2"
 
 // A revision far enough ahead of the current one to be stale.

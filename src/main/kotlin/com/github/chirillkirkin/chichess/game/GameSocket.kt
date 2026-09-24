@@ -147,6 +147,21 @@ private suspend fun handleCommand(
                     connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
             }
         }
+        is ClaimDraw -> {
+            val result = games.claimDraw(gameId, sessionId, command.commandId, command.expectedRevision)
+            when (result) {
+                is MoveResult.Applied ->
+                    connections.broadcast(gameId, result.snapshot.toGameFinished())
+                is MoveResult.RevisionConflict -> {
+                    connection.send(CommandRejectedEvent(command.commandId, REVISION_CONFLICT_CODE))
+                    connection.send(SnapshotEvent(result.snapshot))
+                }
+                is MoveResult.DuplicateCommand ->
+                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                else ->
+                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+            }
+        }
     }
 }
 
@@ -165,6 +180,7 @@ private fun MoveResult.rejectionCode(): String = when (this) {
     MoveResult.GameFinished -> GAME_FINISHED_CODE
     MoveResult.NoDrawOffer -> NO_DRAW_OFFER_CODE
     MoveResult.DrawAlreadyOffered -> DRAW_ALREADY_OFFERED_CODE
+    MoveResult.DrawNotClaimable -> DRAW_NOT_CLAIMABLE_CODE
     is MoveResult.Applied,
     is MoveResult.RevisionConflict,
     is MoveResult.DuplicateCommand -> error("Not a rejection: $this")

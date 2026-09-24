@@ -92,9 +92,16 @@ class ChesslibEngineTest {
     @Test
     fun `isRepetition detects a fivefold repetition of the position`() {
         val fivefold = List(FIVEFOLD_REPETITION_ROUNDS) { KNIGHT_SHUFFLE_ROUND }.flatten()
-        val belowThreshold = List(BELOW_FIVEFOLD_ROUNDS) { KNIGHT_SHUFFLE_ROUND }.flatten()
+        val threefold = List(THREEFOLD_REPETITION_ROUNDS) { KNIGHT_SHUFFLE_ROUND }.flatten()
 
         assertTrue(engine.isRepetition(fivefold, FIVEFOLD_REPETITION_OCCURRENCES))
-        assertFalse(engine.isRepetition(belowThreshold, FIVEFOLD_REPETITION_OCCURRENCES))
+        assertFalse(engine.isRepetition(threefold, FIVEFOLD_REPETITION_OCCURRENCES))
+    }
+
+    @Test
+    fun `isRepetition detects a threefold repetition of the position`() {
+        val threefold = List(THREEFOLD_REPETITION_ROUNDS) { KNIGHT_SHUFFLE_ROUND }.flatten()
+
+        assertTrue(engine.isRepetition(threefold, THREEFOLD_REPETITION_OCCURRENCES))
     }
 }

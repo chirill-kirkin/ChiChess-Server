@@ -241,6 +241,16 @@ class GameSocketTest {
         }
     }
 
+    @Test
+    fun `claiming a draw with no grounds is rejected`() = testGame { game, ws ->
+        val started = ws.startGame(game)
+        ws.webSocket(game.socketUrl(started.whiteToken)) {
+            val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
+            sendCommand(ClaimDraw(GAME_PROTOCOL_VERSION, CLAIM_COMMAND_ID, snapshot.revision))
+            assertEquals(DRAW_NOT_CLAIMABLE_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
+        }
+    }
+
     private suspend fun HttpClient.startGame(game: GameFixture): StartedGame {
         val joiner = createGuestSession()
         postJoinGame(game.inviteCode, joiner.token)

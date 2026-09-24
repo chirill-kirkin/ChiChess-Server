@@ -15,6 +15,7 @@ const val GAME_FINISHED_CODE = "GAME_FINISHED"
 const val REVISION_CONFLICT_CODE = "REVISION_CONFLICT"
 const val NO_DRAW_OFFER_CODE = "NO_DRAW_OFFER"
 const val DRAW_ALREADY_OFFERED_CODE = "DRAW_ALREADY_OFFERED"
+const val DRAW_NOT_CLAIMABLE_CODE = "DRAW_NOT_CLAIMABLE"
 
 internal val gameProtocolJson = Json {
     ignoreUnknownKeys = true
@@ -70,6 +71,14 @@ data class AcceptDraw(
 data class DeclineDraw(
     override val protocolVersion: Int,
     override val commandId: String,
+) : GameCommand
+
+@Serializable
+@SerialName("CLAIM_DRAW")
+data class ClaimDraw(
+    override val protocolVersion: Int,
+    override val commandId: String,
+    val expectedRevision: Long,
 ) : GameCommand
 
 @Serializable
