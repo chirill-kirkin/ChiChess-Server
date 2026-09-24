@@ -70,8 +70,8 @@ GET  /games/history         # -> caller's games as a GameSnapshot list
 
 - `gameId` is the permanent identifier of a game; the invite code is only for the second
   player to join. Colors (`white`/`black`) are assigned randomly.
-- `GameSnapshot` is the per-caller restore format: `yourColor`, `status`, `revision`,
-  `fen`, and `result`/`terminationReason` once finished.
+- `GameSnapshot` is the per-caller restore format: `yourColor`, `status`, `revision`, `fen`,
+  `lastMove`, `pendingDrawOfferBy`, and `result`/`terminationReason` once finished.
 - Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED`. The joining
   player fills the empty color slot under a `<color>_session_id IS NULL` guard (race protection).
 - Read errors: `GAME_NOT_FOUND` (404), `NOT_A_GAME_PARTICIPANT` (403).
@@ -89,12 +89,18 @@ WS   /game/{id}?token=...    # live game channel for a participant
 - Messages are JSON with a `"type"` discriminator. Every command carries `protocolVersion`
   and `commandId`.
 - Commands (client -> server): `REQUEST_SYNC`; `MAKE_MOVE` (`expectedRevision`, `uci`);
-  `RESIGN` (`expectedRevision`, ignored — resignation is unconditional).
+  `RESIGN` (`expectedRevision`, ignored — resignation is unconditional); `OFFER_DRAW`,
+  `ACCEPT_DRAW`, `DECLINE_DRAW` (no `expectedRevision`).
 - Events (server -> client): `SNAPSHOT` (on connect and `REQUEST_SYNC`); `PLAYER_JOINED`
   (a participant connected); `MOVE_APPLIED` and `GAME_FINISHED` (color-neutral state
-  deltas, broadcast to all); `COMMAND_REJECTED` (`code`, to the sender).
+  deltas, broadcast to all); `DRAW_OFFERED` (`by`) and `DRAW_DECLINED`; `COMMAND_REJECTED`
+  (`code`, to the sender).
 - Mutations run under a per-game lock; `expectedRevision != revision` -> `COMMAND_REJECTED`
   (`REVISION_CONFLICT`) plus a fresh `SNAPSHOT`. A repeated `commandId` (recorded atomically
   with the move) is idempotent: the sender just receives the current `SNAPSHOT`.
+- Draw offers are side-state: they set `pendingDrawOfferBy` without bumping `revision` and are
+  cleared by any move or a decline. Only the opponent may accept or decline; accepting finishes
+  the game as `DRAW` / `AGREEMENT`.
 - Command error codes: `UNSUPPORTED_PROTOCOL_VERSION`, `MALFORMED_COMMAND`, `NOT_YOUR_TURN`,
-  `ILLEGAL_MOVE`, `GAME_NOT_READY`, `GAME_FINISHED`, `REVISION_CONFLICT`.
+  `ILLEGAL_MOVE`, `GAME_NOT_READY`, `GAME_FINISHED`, `REVISION_CONFLICT`, `NO_DRAW_OFFER`,
+  `DRAW_ALREADY_OFFERED`.
