@@ -114,6 +114,39 @@ private suspend fun handleCommand(
                     connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
             }
         }
+        is OfferDraw -> {
+            val result = games.offerDraw(gameId, sessionId, command.commandId)
+            when (result) {
+                is MoveResult.Applied ->
+                    connections.broadcast(gameId, DrawOfferedEvent(checkNotNull(result.snapshot.pendingDrawOfferBy)))
+                is MoveResult.DuplicateCommand ->
+                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                else ->
+                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+            }
+        }
+        is AcceptDraw -> {
+            val result = games.acceptDraw(gameId, sessionId, command.commandId)
+            when (result) {
+                is MoveResult.Applied ->
+                    connections.broadcast(gameId, result.snapshot.toGameFinished())
+                is MoveResult.DuplicateCommand ->
+                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                else ->
+                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+            }
+        }
+        is DeclineDraw -> {
+            val result = games.declineDraw(gameId, sessionId, command.commandId)
+            when (result) {
+                is MoveResult.Applied ->
+                    connections.broadcast(gameId, DrawDeclinedEvent)
+                is MoveResult.DuplicateCommand ->
+                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                else ->
+                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+            }
+        }
     }
 }
 
@@ -130,6 +163,8 @@ private fun MoveResult.rejectionCode(): String = when (this) {
     MoveResult.NotYourTurn -> NOT_YOUR_TURN_CODE
     MoveResult.IllegalMove -> ILLEGAL_MOVE_CODE
     MoveResult.GameFinished -> GAME_FINISHED_CODE
+    MoveResult.NoDrawOffer -> NO_DRAW_OFFER_CODE
+    MoveResult.DrawAlreadyOffered -> DRAW_ALREADY_OFFERED_CODE
     is MoveResult.Applied,
     is MoveResult.RevisionConflict,
     is MoveResult.DuplicateCommand -> error("Not a rejection: $this")

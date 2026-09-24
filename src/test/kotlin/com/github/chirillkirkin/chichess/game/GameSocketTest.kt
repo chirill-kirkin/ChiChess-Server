@@ -196,6 +196,51 @@ class GameSocketTest {
         }
     }
 
+    @Test
+    fun `offering a draw notifies the player and persists for reconnect`() = testGame { game, ws ->
+        val started = ws.startGame(game)
+        ws.webSocket(game.socketUrl(started.whiteToken)) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            sendCommand(OfferDraw(GAME_PROTOCOL_VERSION, OFFER_COMMAND_ID))
+            assertEquals(PieceColor.WHITE, assertIs<DrawOfferedEvent>(receiveEvent()).by)
+
+            sendCommand(RequestSync(GAME_PROTOCOL_VERSION, SYNC_COMMAND_ID))
+            assertEquals(PieceColor.WHITE, assertIs<SnapshotEvent>(receiveEvent()).snapshot.pendingDrawOfferBy)
+        }
+    }
+
+    @Test
+    fun `accepting a draw finishes the game by agreement`() = testGame { game, ws ->
+        val started = ws.startGame(game)
+        ws.webSocket(game.socketUrl(started.whiteToken)) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            sendCommand(OfferDraw(GAME_PROTOCOL_VERSION, OFFER_COMMAND_ID))
+            assertIs<DrawOfferedEvent>(receiveEvent())
+        }
+        ws.webSocket(game.socketUrl(started.blackToken)) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            sendCommand(AcceptDraw(GAME_PROTOCOL_VERSION, ACCEPT_COMMAND_ID))
+            val finished = assertIs<GameFinishedEvent>(receiveEvent())
+            assertEquals(GameResult.DRAW, finished.result)
+            assertEquals(TerminationReason.AGREEMENT, finished.terminationReason)
+        }
+    }
+
+    @Test
+    fun `declining a draw notifies the player`() = testGame { game, ws ->
+        val started = ws.startGame(game)
+        ws.webSocket(game.socketUrl(started.whiteToken)) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            sendCommand(OfferDraw(GAME_PROTOCOL_VERSION, OFFER_COMMAND_ID))
+            assertIs<DrawOfferedEvent>(receiveEvent())
+        }
+        ws.webSocket(game.socketUrl(started.blackToken)) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            sendCommand(DeclineDraw(GAME_PROTOCOL_VERSION, DECLINE_COMMAND_ID))
+            assertIs<DrawDeclinedEvent>(receiveEvent())
+        }
+    }
+
     private suspend fun HttpClient.startGame(game: GameFixture): StartedGame {
         val joiner = createGuestSession()
         postJoinGame(game.inviteCode, joiner.token)

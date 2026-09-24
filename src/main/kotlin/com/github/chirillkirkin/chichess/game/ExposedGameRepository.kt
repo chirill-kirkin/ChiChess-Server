@@ -30,6 +30,7 @@ internal object Games : Table("games") {
     val status = varchar("status", GAME_ENUM_COLUMN_LENGTH)
     val revision = long("revision")
     val fen = varchar("fen", FEN_COLUMN_LENGTH)
+    val drawOfferedBy = varchar("draw_offered_by", GAME_ENUM_COLUMN_LENGTH).nullable()
     val result = varchar("result", GAME_ENUM_COLUMN_LENGTH).nullable()
     val terminationReason = varchar("termination_reason", GAME_ENUM_COLUMN_LENGTH).nullable()
     val createdAt = long("created_at")
@@ -185,6 +186,7 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
                 it[fen] = fenAfter
                 it[revision] = newRevision
                 it[status] = newStatus.name
+                it[drawOfferedBy] = null // A move withdraws any pending draw offer.
                 it[Games.result] = result?.name
                 it[Games.terminationReason] = terminationReason?.name
                 it[updatedAt] = now
@@ -206,8 +208,33 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
             Games.update({ Games.id eq gameKey }) {
                 it[status] = GameStatus.FINISHED.name
                 it[revision] = newRevision
+                it[drawOfferedBy] = null
                 it[Games.result] = result.name
                 it[Games.terminationReason] = terminationReason.name
+                it[updatedAt] = now
+            }
+            markCommandProcessed(gameKey, commandId, now)
+        }
+    }
+
+    override suspend fun setDrawOffer(gameId: UUID, commandId: String, offeredBy: PieceColor): Unit =
+        withContext(Dispatchers.IO) {
+            updateDrawOffer(gameId, commandId, offeredBy.name)
+        }
+
+    override suspend fun clearDrawOffer(gameId: UUID, commandId: String): Unit =
+        withContext(Dispatchers.IO) {
+            updateDrawOffer(gameId, commandId, offeredBy = null)
+        }
+
+    // Offering and declining are unconditional side-state, so they change draw_offered_by without
+    // bumping the revision; only a finishing accept does.
+    private fun updateDrawOffer(gameId: UUID, commandId: String, offeredBy: String?) {
+        val gameKey = gameId.toString()
+        val now = System.currentTimeMillis()
+        transaction(database) {
+            Games.update({ Games.id eq gameKey }) {
+                it[drawOfferedBy] = offeredBy
                 it[updatedAt] = now
             }
             markCommandProcessed(gameKey, commandId, now)
@@ -232,6 +259,7 @@ private fun ResultRow.toGame(lastMove: String?): Game = Game(
     revision = this[Games.revision],
     fen = this[Games.fen],
     lastMove = lastMove,
+    drawOfferedBy = this[Games.drawOfferedBy]?.let(PieceColor::valueOf),
     result = this[Games.result]?.let(GameResult::valueOf),
     terminationReason = this[Games.terminationReason]?.let(TerminationReason::valueOf),
 )

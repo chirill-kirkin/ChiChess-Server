@@ -33,6 +33,7 @@ data class GameSnapshot(
     val revision: Long,
     val fen: String,
     val lastMove: String? = null,
+    val pendingDrawOfferBy: PieceColor? = null,
     val result: GameResult? = null,
     val terminationReason: TerminationReason? = null,
 )
@@ -60,6 +61,8 @@ sealed interface MoveResult {
     data object NotYourTurn : MoveResult
     data object IllegalMove : MoveResult
     data object GameFinished : MoveResult
+    data object NoDrawOffer : MoveResult
+    data object DrawAlreadyOffered : MoveResult
 }
 
 interface GameRepository {
@@ -88,6 +91,8 @@ interface GameRepository {
         result: GameResult,
         terminationReason: TerminationReason,
     )
+    suspend fun setDrawOffer(gameId: UUID, commandId: String, offeredBy: PieceColor)
+    suspend fun clearDrawOffer(gameId: UUID, commandId: String)
 }
 
 private fun Game.snapshotFor(color: PieceColor): GameSnapshot = GameSnapshot(
@@ -98,6 +103,7 @@ private fun Game.snapshotFor(color: PieceColor): GameSnapshot = GameSnapshot(
     revision = revision,
     fen = fen,
     lastMove = lastMove,
+    pendingDrawOfferBy = drawOfferedBy,
     result = result,
     terminationReason = terminationReason,
 )
@@ -142,84 +148,128 @@ class GameService(
         expectedRevision: Long,
         uci: String,
     ): MoveResult = locks.withGameLock(gameId) {
-        if (repository.isCommandProcessed(gameId, commandId)) {
-            return@withGameLock MoveResult.DuplicateCommand(snapshotFor(gameId, sessionId))
-        }
-        val game = repository.findById(gameId) ?: return@withGameLock MoveResult.NotFound
-        val color = game.colorOf(sessionId) ?: return@withGameLock MoveResult.NotParticipant
-        when (game.status) {
-            GameStatus.FINISHED -> return@withGameLock MoveResult.GameFinished
-            GameStatus.WAITING_FOR_OPPONENT -> return@withGameLock MoveResult.NotReady
-            GameStatus.IN_PROGRESS -> Unit
-        }
-        if (game.revision != expectedRevision) {
-            return@withGameLock MoveResult.RevisionConflict(game.snapshotFor(color))
-        }
-        if (engine.sideToMove(game.fen) != color) return@withGameLock MoveResult.NotYourTurn
-        val outcome = engine.applyMove(game.fen, uci)
-        if (outcome !is MoveOutcome.Applied) return@withGameLock MoveResult.IllegalMove
+        withActiveParticipant(gameId, sessionId, commandId) { game, color ->
+            if (game.revision != expectedRevision) {
+                return@withActiveParticipant MoveResult.RevisionConflict(game.snapshotFor(color))
+            }
+            if (engine.sideToMove(game.fen) != color) return@withActiveParticipant MoveResult.NotYourTurn
+            val outcome = engine.applyMove(game.fen, uci)
+            if (outcome !is MoveOutcome.Applied) return@withActiveParticipant MoveResult.IllegalMove
 
-        var result = outcome.result
-        var terminationReason = outcome.terminationReason
-        // Position-based rules can't see repetition; the half-move clock cheaply rules out a
-        // fivefold before paying for the history replay.
-        if (result == null &&
-            engine.halfMoveClock(outcome.fenAfter) >= MIN_PLIES_FOR_FIVEFOLD &&
-            engine.isRepetition(repository.movesOf(gameId) + uci, FIVEFOLD_REPETITION_OCCURRENCES)
-        ) {
-            result = GameResult.DRAW
-            terminationReason = TerminationReason.FIVEFOLD_REPETITION
-        }
+            var result = outcome.result
+            var terminationReason = outcome.terminationReason
+            // Position-based rules can't see repetition; the half-move clock cheaply rules out a
+            // fivefold before paying for the history replay.
+            if (result == null &&
+                engine.halfMoveClock(outcome.fenAfter) >= MIN_PLIES_FOR_FIVEFOLD &&
+                engine.isRepetition(repository.movesOf(gameId) + uci, FIVEFOLD_REPETITION_OCCURRENCES)
+            ) {
+                result = GameResult.DRAW
+                terminationReason = TerminationReason.FIVEFOLD_REPETITION
+            }
 
-        val newRevision = game.revision + 1
-        val newStatus = if (result != null) GameStatus.FINISHED else GameStatus.IN_PROGRESS
-        repository.recordMove(
-            gameId = gameId,
-            movedBySessionId = sessionId,
-            commandId = commandId,
-            ply = engine.plyNumber(outcome.fenAfter),
-            uci = uci,
-            fenAfter = outcome.fenAfter,
-            newRevision = newRevision,
-            newStatus = newStatus,
-            result = result,
-            terminationReason = terminationReason,
-        )
-        val updated = game.copy(
-            status = newStatus,
-            revision = newRevision,
-            fen = outcome.fenAfter,
-            lastMove = uci,
-            result = result,
-            terminationReason = terminationReason,
-        )
-        MoveResult.Applied(updated.snapshotFor(color))
+            val newRevision = game.revision + 1
+            val newStatus = if (result != null) GameStatus.FINISHED else GameStatus.IN_PROGRESS
+            repository.recordMove(
+                gameId = gameId,
+                movedBySessionId = sessionId,
+                commandId = commandId,
+                ply = engine.plyNumber(outcome.fenAfter),
+                uci = uci,
+                fenAfter = outcome.fenAfter,
+                newRevision = newRevision,
+                newStatus = newStatus,
+                result = result,
+                terminationReason = terminationReason,
+            )
+            val updated = game.copy(
+                status = newStatus,
+                revision = newRevision,
+                fen = outcome.fenAfter,
+                lastMove = uci,
+                drawOfferedBy = null,
+                result = result,
+                terminationReason = terminationReason,
+            )
+            MoveResult.Applied(updated.snapshotFor(color))
+        }
     }
 
     // Resignation is unconditional, so it does not check expectedRevision — only that the game is in progress.
     suspend fun submitResign(gameId: UUID, sessionId: UUID, commandId: String): MoveResult =
         locks.withGameLock(gameId) {
-            if (repository.isCommandProcessed(gameId, commandId)) {
-                return@withGameLock MoveResult.DuplicateCommand(snapshotFor(gameId, sessionId))
+            withActiveParticipant(gameId, sessionId, commandId) { game, color ->
+                val result = if (color == PieceColor.WHITE) GameResult.BLACK_WON else GameResult.WHITE_WON
+                val newRevision = game.revision + 1
+                repository.finishGame(gameId, commandId, newRevision, result, TerminationReason.RESIGNATION)
+                val updated = game.copy(
+                    status = GameStatus.FINISHED,
+                    revision = newRevision,
+                    result = result,
+                    terminationReason = TerminationReason.RESIGNATION,
+                )
+                MoveResult.Applied(updated.snapshotFor(color))
             }
-            val game = repository.findById(gameId) ?: return@withGameLock MoveResult.NotFound
-            val color = game.colorOf(sessionId) ?: return@withGameLock MoveResult.NotParticipant
-            when (game.status) {
-                GameStatus.FINISHED -> return@withGameLock MoveResult.GameFinished
-                GameStatus.WAITING_FOR_OPPONENT -> return@withGameLock MoveResult.NotReady
-                GameStatus.IN_PROGRESS -> Unit
-            }
-            val result = if (color == PieceColor.WHITE) GameResult.BLACK_WON else GameResult.WHITE_WON
-            val newRevision = game.revision + 1
-            repository.finishGame(gameId, commandId, newRevision, result, TerminationReason.RESIGNATION)
-            val updated = game.copy(
-                status = GameStatus.FINISHED,
-                revision = newRevision,
-                result = result,
-                terminationReason = TerminationReason.RESIGNATION,
-            )
-            MoveResult.Applied(updated.snapshotFor(color))
         }
+
+    suspend fun offerDraw(gameId: UUID, sessionId: UUID, commandId: String): MoveResult =
+        locks.withGameLock(gameId) {
+            withActiveParticipant(gameId, sessionId, commandId) { game, color ->
+                if (game.drawOfferedBy != null) return@withActiveParticipant MoveResult.DrawAlreadyOffered
+                repository.setDrawOffer(gameId, commandId, color)
+                MoveResult.Applied(game.copy(drawOfferedBy = color).snapshotFor(color))
+            }
+        }
+
+    suspend fun acceptDraw(gameId: UUID, sessionId: UUID, commandId: String): MoveResult =
+        locks.withGameLock(gameId) {
+            withActiveParticipant(gameId, sessionId, commandId) { game, color ->
+                // Only the opponent of the offering side can accept; you cannot accept your own offer.
+                if (game.drawOfferedBy == null || game.drawOfferedBy == color) {
+                    return@withActiveParticipant MoveResult.NoDrawOffer
+                }
+                val newRevision = game.revision + 1
+                repository.finishGame(gameId, commandId, newRevision, GameResult.DRAW, TerminationReason.AGREEMENT)
+                val updated = game.copy(
+                    status = GameStatus.FINISHED,
+                    revision = newRevision,
+                    drawOfferedBy = null,
+                    result = GameResult.DRAW,
+                    terminationReason = TerminationReason.AGREEMENT,
+                )
+                MoveResult.Applied(updated.snapshotFor(color))
+            }
+        }
+
+    suspend fun declineDraw(gameId: UUID, sessionId: UUID, commandId: String): MoveResult =
+        locks.withGameLock(gameId) {
+            withActiveParticipant(gameId, sessionId, commandId) { game, color ->
+                if (game.drawOfferedBy == null || game.drawOfferedBy == color) {
+                    return@withActiveParticipant MoveResult.NoDrawOffer
+                }
+                repository.clearDrawOffer(gameId, commandId)
+                MoveResult.Applied(game.copy(drawOfferedBy = null).snapshotFor(color))
+            }
+        }
+
+    // Common preamble for a mutating command: dedup, load the game, and require an in-progress participant.
+    private suspend fun withActiveParticipant(
+        gameId: UUID,
+        sessionId: UUID,
+        commandId: String,
+        onActive: suspend (Game, PieceColor) -> MoveResult,
+    ): MoveResult {
+        if (repository.isCommandProcessed(gameId, commandId)) {
+            return MoveResult.DuplicateCommand(snapshotFor(gameId, sessionId))
+        }
+        val game = repository.findById(gameId) ?: return MoveResult.NotFound
+        val color = game.colorOf(sessionId) ?: return MoveResult.NotParticipant
+        return when (game.status) {
+            GameStatus.FINISHED -> MoveResult.GameFinished
+            GameStatus.WAITING_FOR_OPPONENT -> MoveResult.NotReady
+            GameStatus.IN_PROGRESS -> onActive(game, color)
+        }
+    }
 
     private suspend fun snapshotFor(gameId: UUID, sessionId: UUID): GameSnapshot? {
         val game = repository.findById(gameId) ?: return null

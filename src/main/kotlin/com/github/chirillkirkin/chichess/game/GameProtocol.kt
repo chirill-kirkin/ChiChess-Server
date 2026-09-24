@@ -13,6 +13,8 @@ const val ILLEGAL_MOVE_CODE = "ILLEGAL_MOVE"
 const val GAME_NOT_READY_CODE = "GAME_NOT_READY"
 const val GAME_FINISHED_CODE = "GAME_FINISHED"
 const val REVISION_CONFLICT_CODE = "REVISION_CONFLICT"
+const val NO_DRAW_OFFER_CODE = "NO_DRAW_OFFER"
+const val DRAW_ALREADY_OFFERED_CODE = "DRAW_ALREADY_OFFERED"
 
 internal val gameProtocolJson = Json {
     ignoreUnknownKeys = true
@@ -50,6 +52,27 @@ data class Resign(
 ) : GameCommand
 
 @Serializable
+@SerialName("OFFER_DRAW")
+data class OfferDraw(
+    override val protocolVersion: Int,
+    override val commandId: String,
+) : GameCommand
+
+@Serializable
+@SerialName("ACCEPT_DRAW")
+data class AcceptDraw(
+    override val protocolVersion: Int,
+    override val commandId: String,
+) : GameCommand
+
+@Serializable
+@SerialName("DECLINE_DRAW")
+data class DeclineDraw(
+    override val protocolVersion: Int,
+    override val commandId: String,
+) : GameCommand
+
+@Serializable
 sealed interface GameEvent
 
 @Serializable
@@ -79,6 +102,14 @@ data class GameFinishedEvent(
     val result: GameResult,
     val terminationReason: TerminationReason,
 ) : GameEvent
+
+@Serializable
+@SerialName("DRAW_OFFERED")
+data class DrawOfferedEvent(val by: PieceColor) : GameEvent
+
+@Serializable
+@SerialName("DRAW_DECLINED")
+data object DrawDeclinedEvent : GameEvent
 
 @Serializable
 @SerialName("COMMAND_REJECTED")

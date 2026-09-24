@@ -212,6 +212,85 @@ class GameServiceTest {
     }
 
     @Test
+    fun `draw offer accepted by the opponent ends the game by agreement`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val black = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = black)
+        val service = service(repository)
+
+        val offered = assertIs<MoveResult.Applied>(service.offerDraw(game.id, white, OFFER_COMMAND_ID))
+        assertEquals(PieceColor.WHITE, offered.snapshot.pendingDrawOfferBy)
+
+        val accepted = assertIs<MoveResult.Applied>(service.acceptDraw(game.id, black, ACCEPT_COMMAND_ID))
+        assertEquals(GameStatus.FINISHED, accepted.snapshot.status)
+        assertEquals(GameResult.DRAW, accepted.snapshot.result)
+        assertEquals(TerminationReason.AGREEMENT, accepted.snapshot.terminationReason)
+    }
+
+    @Test
+    fun `declining a draw clears the pending offer`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val black = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = black)
+        val service = service(repository)
+        service.offerDraw(game.id, white, OFFER_COMMAND_ID)
+
+        val declined = assertIs<MoveResult.Applied>(service.declineDraw(game.id, black, DECLINE_COMMAND_ID))
+
+        assertEquals(GameStatus.IN_PROGRESS, declined.snapshot.status)
+        assertEquals(null, declined.snapshot.pendingDrawOfferBy)
+    }
+
+    @Test
+    fun `accepting your own draw offer is rejected`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val service = service(repository)
+        service.offerDraw(game.id, white, OFFER_COMMAND_ID)
+
+        assertTrue(service.acceptDraw(game.id, white, ACCEPT_COMMAND_ID) is MoveResult.NoDrawOffer)
+    }
+
+    @Test
+    fun `offering a draw while one is pending is rejected`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val black = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = black)
+        val service = service(repository)
+        service.offerDraw(game.id, white, OFFER_COMMAND_ID)
+
+        assertTrue(service.offerDraw(game.id, black, SECOND_COMMAND_ID) is MoveResult.DrawAlreadyOffered)
+    }
+
+    @Test
+    fun `accepting with no pending offer is rejected`() = runBlocking {
+        val repository = FakeGameRepository()
+        val black = UUID.randomUUID()
+        val game = repository.seedInProgress(white = UUID.randomUUID(), black = black)
+
+        assertTrue(service(repository).acceptDraw(game.id, black, ACCEPT_COMMAND_ID) is MoveResult.NoDrawOffer)
+    }
+
+    @Test
+    fun `a move withdraws a pending draw offer`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val service = service(repository)
+        service.offerDraw(game.id, white, OFFER_COMMAND_ID)
+
+        val moved = assertIs<MoveResult.Applied>(
+            service.submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE),
+        )
+
+        assertEquals(null, moved.snapshot.pendingDrawOfferBy)
+    }
+
+    @Test
     fun `submitResign rejects a game still waiting for an opponent`() = runBlocking {
         val repository = FakeGameRepository()
         val service = service(repository)
@@ -254,6 +333,7 @@ private class FakeGameRepository : GameRepository {
             revision = INITIAL_REVISION,
             fen = fen,
             lastMove = null,
+            drawOfferedBy = null,
             result = null,
             terminationReason = null,
         )
@@ -284,6 +364,7 @@ private class FakeGameRepository : GameRepository {
             revision = INITIAL_REVISION,
             fen = START_FEN,
             lastMove = null,
+            drawOfferedBy = null,
             result = null,
             terminationReason = null,
         )
@@ -319,6 +400,7 @@ private class FakeGameRepository : GameRepository {
         games[gameId] = games.getValue(gameId).copy(
             fen = fenAfter,
             lastMove = uci,
+            drawOfferedBy = null,
             revision = newRevision,
             status = newStatus,
             result = result,
@@ -337,9 +419,20 @@ private class FakeGameRepository : GameRepository {
         games[gameId] = games.getValue(gameId).copy(
             status = GameStatus.FINISHED,
             revision = newRevision,
+            drawOfferedBy = null,
             result = result,
             terminationReason = terminationReason,
         )
+        processedCommands += gameId to commandId
+    }
+
+    override suspend fun setDrawOffer(gameId: UUID, commandId: String, offeredBy: PieceColor) {
+        games[gameId] = games.getValue(gameId).copy(drawOfferedBy = offeredBy)
+        processedCommands += gameId to commandId
+    }
+
+    override suspend fun clearDrawOffer(gameId: UUID, commandId: String) {
+        games[gameId] = games.getValue(gameId).copy(drawOfferedBy = null)
         processedCommands += gameId to commandId
     }
 }

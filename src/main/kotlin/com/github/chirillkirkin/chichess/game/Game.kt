@@ -17,6 +17,7 @@ enum class TerminationReason {
     CHECKMATE,
     STALEMATE,
     RESIGNATION,
+    AGREEMENT,
     INSUFFICIENT_MATERIAL,
     SEVENTY_FIVE_MOVE_RULE,
     FIVEFOLD_REPETITION,
@@ -31,6 +32,7 @@ data class Game(
     val revision: Long,
     val fen: String,
     val lastMove: String?,
+    val drawOfferedBy: PieceColor?,
     val result: GameResult?,
     val terminationReason: TerminationReason?,
 ) {

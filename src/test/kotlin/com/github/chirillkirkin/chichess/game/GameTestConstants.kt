@@ -37,6 +37,10 @@ internal const val MOVE_COMMAND_ID = "move-1"
 internal const val SYNC_COMMAND_ID = "sync-1"
 internal const val RESIGN_COMMAND_ID = "resign-1"
 internal const val DUPLICATE_COMMAND_ID = "dup-1"
+internal const val OFFER_COMMAND_ID = "offer-1"
+internal const val ACCEPT_COMMAND_ID = "accept-1"
+internal const val DECLINE_COMMAND_ID = "decline-1"
+internal const val SECOND_COMMAND_ID = "cmd-2"
 
 // A revision far enough ahead of the current one to be stale.
 internal const val STALE_REVISION_OFFSET = 5L
