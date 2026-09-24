@@ -90,7 +90,7 @@ WS   /game/{id}?token=...    # live game channel for a participant
   and `commandId`.
 - Commands (client -> server): `REQUEST_SYNC`; `MAKE_MOVE` (`expectedRevision`, `uci`);
   `RESIGN` (`expectedRevision`, ignored — resignation is unconditional); `OFFER_DRAW`,
-  `ACCEPT_DRAW`, `DECLINE_DRAW` (no `expectedRevision`).
+  `ACCEPT_DRAW`, `DECLINE_DRAW` (no `expectedRevision`); `CLAIM_DRAW` (`expectedRevision`).
 - Events (server -> client): `SNAPSHOT` (on connect and `REQUEST_SYNC`); `PLAYER_JOINED`
   (a participant connected); `MOVE_APPLIED` and `GAME_FINISHED` (color-neutral state
   deltas, broadcast to all); `DRAW_OFFERED` (`by`) and `DRAW_DECLINED`; `COMMAND_REJECTED`
@@ -101,6 +101,10 @@ WS   /game/{id}?token=...    # live game channel for a participant
 - Draw offers are side-state: they set `pendingDrawOfferBy` without bumping `revision` and are
   cleared by any move or a decline. Only the opponent may accept or decline; accepting finishes
   the game as `DRAW` / `AGREEMENT`.
+- `CLAIM_DRAW` finishes the game when the current position allows it — threefold repetition
+  (`THREEFOLD_REPETITION`) or the 50-move rule (`FIFTY_MOVE_RULE`) — otherwise it is rejected
+  with `DRAW_NOT_CLAIMABLE`. Automatic draws (`INSUFFICIENT_MATERIAL`, `SEVENTY_FIVE_MOVE_RULE`,
+  `FIVEFOLD_REPETITION`, stalemate) end the game on the move itself, with no claim needed.
 - Command error codes: `UNSUPPORTED_PROTOCOL_VERSION`, `MALFORMED_COMMAND`, `NOT_YOUR_TURN`,
   `ILLEGAL_MOVE`, `GAME_NOT_READY`, `GAME_FINISHED`, `REVISION_CONFLICT`, `NO_DRAW_OFFER`,
-  `DRAW_ALREADY_OFFERED`.
+  `DRAW_ALREADY_OFFERED`, `DRAW_NOT_CLAIMABLE`.
