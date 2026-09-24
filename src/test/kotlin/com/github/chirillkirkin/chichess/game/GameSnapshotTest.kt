@@ -47,7 +47,7 @@ class GameSnapshotTest {
     fun `malformed game id returns not found`() = testGame {
         val reader = client.createGuestSession()
 
-        val response = client.getGame("not-a-uuid", reader.token)
+        val response = client.getGame(MALFORMED_GAME_ID, reader.token)
 
         assertError(response, HttpStatusCode.NotFound, GAME_NOT_FOUND_CODE)
     }

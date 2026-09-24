@@ -11,10 +11,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 private const val GAME_TEST_RANDOM_SEED = 73L
-private const val COMMAND_ID = "cmd-1"
-
-// Position after 1. f3 e5 2. g4, black to move: d8h4 is Qh4#.
-private const val FOOLS_MATE_FEN = "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2"
 
 class GameServiceTest {
     private fun service(repository: GameRepository): GameService =
@@ -81,12 +77,13 @@ class GameServiceTest {
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
 
-        val result = service(repository).submitMove(game.id, white, COMMAND_ID, INITIAL_REVISION, "e2e4")
+        val result = service(repository).submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE)
 
         val applied = assertIs<MoveResult.Applied>(result)
         assertEquals(GameStatus.IN_PROGRESS, applied.snapshot.status)
         assertEquals(INITIAL_REVISION + 1, applied.snapshot.revision)
         assertNotEquals(START_FEN, applied.snapshot.fen)
+        assertEquals(OPENING_MOVE, applied.snapshot.lastMove)
         assertEquals(PieceColor.WHITE, applied.snapshot.yourColor)
         assertEquals(1, repository.lastRecordedPly)
     }
@@ -97,7 +94,8 @@ class GameServiceTest {
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
 
-        val result = service(repository).submitMove(game.id, white, COMMAND_ID, INITIAL_REVISION + 5, "e2e4")
+        val result = service(repository)
+            .submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION + STALE_REVISION_OFFSET, OPENING_MOVE)
 
         val conflict = assertIs<MoveResult.RevisionConflict>(result)
         assertEquals(INITIAL_REVISION, conflict.snapshot.revision)
@@ -109,9 +107,9 @@ class GameServiceTest {
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
         val service = service(repository)
-        service.submitMove(game.id, white, COMMAND_ID, INITIAL_REVISION, "e2e4")
+        service.submitMove(game.id, white, DUPLICATE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE)
 
-        val duplicate = service.submitMove(game.id, white, COMMAND_ID, INITIAL_REVISION + 1, "e2e4")
+        val duplicate = service.submitMove(game.id, white, DUPLICATE_COMMAND_ID, INITIAL_REVISION + 1, OPENING_MOVE)
 
         assertIs<MoveResult.DuplicateCommand>(duplicate)
         assertEquals(INITIAL_REVISION + 1, repository.findById(game.id)?.revision)
@@ -123,7 +121,7 @@ class GameServiceTest {
         val black = UUID.randomUUID()
         val game = repository.seedInProgress(white = UUID.randomUUID(), black = black)
 
-        val result = service(repository).submitMove(game.id, black, COMMAND_ID, INITIAL_REVISION, "e7e5")
+        val result = service(repository).submitMove(game.id, black, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_REPLY)
 
         assertTrue(result is MoveResult.NotYourTurn)
     }
@@ -134,7 +132,7 @@ class GameServiceTest {
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
 
-        val result = service(repository).submitMove(game.id, white, COMMAND_ID, INITIAL_REVISION, "e2e5")
+        val result = service(repository).submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, ILLEGAL_MOVE_UCI)
 
         assertTrue(result is MoveResult.IllegalMove)
     }
@@ -146,21 +144,21 @@ class GameServiceTest {
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
         val service = service(repository)
 
-        assertTrue(service.submitMove(game.id, UUID.randomUUID(), COMMAND_ID, INITIAL_REVISION, "e2e4") is MoveResult.NotParticipant)
-        assertTrue(service.submitMove(UUID.randomUUID(), white, COMMAND_ID, INITIAL_REVISION, "e2e4") is MoveResult.NotFound)
+        assertTrue(service.submitMove(game.id, UUID.randomUUID(), MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE) is MoveResult.NotParticipant)
+        assertTrue(service.submitMove(UUID.randomUUID(), white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE) is MoveResult.NotFound)
 
         repository.markFinished(game.id)
-        assertTrue(service.submitMove(game.id, white, COMMAND_ID, INITIAL_REVISION, "e2e4") is MoveResult.GameFinished)
+        assertTrue(service.submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE) is MoveResult.GameFinished)
     }
 
     @Test
     fun `submitMove finalizes the game on checkmate`() = runBlocking {
         val repository = FakeGameRepository()
         val black = UUID.randomUUID()
-        val game = repository.seedInProgress(white = UUID.randomUUID(), black = black, fen = FOOLS_MATE_FEN)
+        val game = repository.seedInProgress(white = UUID.randomUUID(), black = black, fen = CHECKMATE_IN_ONE_FEN)
 
         val applied = assertIs<MoveResult.Applied>(
-            service(repository).submitMove(game.id, black, COMMAND_ID, INITIAL_REVISION, "d8h4"),
+            service(repository).submitMove(game.id, black, MOVE_COMMAND_ID, INITIAL_REVISION, CHECKMATE_MOVE),
         )
 
         assertEquals(GameStatus.FINISHED, applied.snapshot.status)
@@ -174,7 +172,7 @@ class GameServiceTest {
         val white = UUID.randomUUID()
         val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
 
-        val applied = assertIs<MoveResult.Applied>(service(repository).submitResign(game.id, white, COMMAND_ID))
+        val applied = assertIs<MoveResult.Applied>(service(repository).submitResign(game.id, white, RESIGN_COMMAND_ID))
 
         assertEquals(GameStatus.FINISHED, applied.snapshot.status)
         assertEquals(GameResult.BLACK_WON, applied.snapshot.result)
@@ -188,7 +186,7 @@ class GameServiceTest {
         val creator = UUID.randomUUID()
         val gameId = UUID.fromString(service.create(creator).gameId)
 
-        assertTrue(service.submitResign(gameId, creator, COMMAND_ID) is MoveResult.NotReady)
+        assertTrue(service.submitResign(gameId, creator, RESIGN_COMMAND_ID) is MoveResult.NotReady)
     }
 }
 
@@ -205,12 +203,13 @@ private class FakeGameRepository : GameRepository {
     fun seedInProgress(white: UUID, black: UUID, fen: String = START_FEN): Game {
         val game = Game(
             id = UUID.randomUUID(),
-            inviteCode = "INPROGRESS",
+            inviteCode = IN_PROGRESS_INVITE_CODE,
             whiteSessionId = white,
             blackSessionId = black,
             status = GameStatus.IN_PROGRESS,
             revision = INITIAL_REVISION,
             fen = fen,
+            lastMove = null,
             result = null,
             terminationReason = null,
         )
@@ -240,6 +239,7 @@ private class FakeGameRepository : GameRepository {
             status = GameStatus.WAITING_FOR_OPPONENT,
             revision = INITIAL_REVISION,
             fen = START_FEN,
+            lastMove = null,
             result = null,
             terminationReason = null,
         )
@@ -271,6 +271,7 @@ private class FakeGameRepository : GameRepository {
         lastRecordedPly = ply
         games[gameId] = games.getValue(gameId).copy(
             fen = fenAfter,
+            lastMove = uci,
             revision = newRevision,
             status = newStatus,
             result = result,

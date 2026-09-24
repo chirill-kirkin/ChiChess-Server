@@ -57,7 +57,7 @@ class GameSocketTest {
     fun `request sync returns a fresh snapshot`() = testGame { game, ws ->
         ws.webSocket(game.socketUrl(game.creator.token)) {
             assertIs<SnapshotEvent>(receiveEvent())
-            sendCommand(RequestSync(GAME_PROTOCOL_VERSION, commandId = "sync-1"))
+            sendCommand(RequestSync(GAME_PROTOCOL_VERSION, commandId = SYNC_COMMAND_ID))
             assertIs<SnapshotEvent>(receiveEvent())
         }
     }
@@ -66,7 +66,7 @@ class GameSocketTest {
     fun `unsupported protocol version is rejected`() = testGame { game, ws ->
         ws.webSocket(game.socketUrl(game.creator.token)) {
             assertIs<SnapshotEvent>(receiveEvent())
-            sendCommand(RequestSync(WRONG_PROTOCOL_VERSION, commandId = "sync-1"))
+            sendCommand(RequestSync(WRONG_PROTOCOL_VERSION, commandId = SYNC_COMMAND_ID))
             val rejected = assertIs<CommandRejectedEvent>(receiveEvent())
             assertEquals(UNSUPPORTED_PROTOCOL_VERSION_CODE, rejected.code)
         }
@@ -76,7 +76,7 @@ class GameSocketTest {
     fun `malformed command is rejected`() = testGame { game, ws ->
         ws.webSocket(game.socketUrl(game.creator.token)) {
             assertIs<SnapshotEvent>(receiveEvent())
-            send(Frame.Text("not json"))
+            send(Frame.Text(MALFORMED_COMMAND_TEXT))
             val rejected = assertIs<CommandRejectedEvent>(receiveEvent())
             assertEquals(MALFORMED_COMMAND_CODE, rejected.code)
         }
@@ -101,11 +101,25 @@ class GameSocketTest {
         val started = ws.startGame(game)
         ws.webSocket(game.socketUrl(started.whiteToken)) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "m1", snapshot.revision, "e2e4"))
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
             val applied = assertIs<MoveAppliedEvent>(receiveEvent())
-            assertEquals("e2e4", applied.lastMove)
+            assertEquals(OPENING_MOVE, applied.lastMove)
             assertEquals(snapshot.revision + 1, applied.revision)
             assertEquals(GameStatus.IN_PROGRESS, applied.status)
+        }
+    }
+
+    @Test
+    fun `snapshot restores the last move after a sync`() = testGame { game, ws ->
+        val started = ws.startGame(game)
+        ws.webSocket(game.socketUrl(started.whiteToken)) {
+            val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
+            assertEquals(null, snapshot.lastMove)
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
+            assertIs<MoveAppliedEvent>(receiveEvent())
+
+            sendCommand(RequestSync(GAME_PROTOCOL_VERSION, SYNC_COMMAND_ID))
+            assertEquals(OPENING_MOVE, assertIs<SnapshotEvent>(receiveEvent()).snapshot.lastMove)
         }
     }
 
@@ -114,7 +128,7 @@ class GameSocketTest {
         val started = ws.startGame(game)
         ws.webSocket(game.socketUrl(started.whiteToken)) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "m1", snapshot.revision + 5, "e2e4"))
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision + STALE_REVISION_OFFSET, OPENING_MOVE))
             assertEquals(REVISION_CONFLICT_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
             assertIs<SnapshotEvent>(receiveEvent())
         }
@@ -125,7 +139,7 @@ class GameSocketTest {
         val started = ws.startGame(game)
         ws.webSocket(game.socketUrl(started.whiteToken)) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "m1", snapshot.revision, "e2e5"))
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, ILLEGAL_MOVE_UCI))
             assertEquals(ILLEGAL_MOVE_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
         }
     }
@@ -135,7 +149,7 @@ class GameSocketTest {
         val started = ws.startGame(game)
         ws.webSocket(game.socketUrl(started.blackToken)) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "m1", snapshot.revision, "e7e5"))
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_REPLY))
             assertEquals(NOT_YOUR_TURN_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
         }
     }
@@ -145,7 +159,7 @@ class GameSocketTest {
         val started = ws.startGame(game)
         ws.webSocket(game.socketUrl(started.whiteToken)) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-            sendCommand(Resign(GAME_PROTOCOL_VERSION, "r1", snapshot.revision))
+            sendCommand(Resign(GAME_PROTOCOL_VERSION, RESIGN_COMMAND_ID, snapshot.revision))
             val finished = assertIs<GameFinishedEvent>(receiveEvent())
             assertEquals(GameStatus.FINISHED, finished.status)
             assertEquals(TerminationReason.RESIGNATION, finished.terminationReason)
@@ -157,10 +171,10 @@ class GameSocketTest {
         val started = ws.startGame(game)
         ws.webSocket(game.socketUrl(started.whiteToken)) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "dup", snapshot.revision, "e2e4"))
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, DUPLICATE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
             val applied = assertIs<MoveAppliedEvent>(receiveEvent())
 
-            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "dup", applied.revision, "e2e4"))
+            sendCommand(MakeMove(GAME_PROTOCOL_VERSION, DUPLICATE_COMMAND_ID, applied.revision, OPENING_MOVE))
             assertEquals(applied.revision, assertIs<SnapshotEvent>(receiveEvent()).snapshot.revision)
         }
     }
@@ -172,13 +186,13 @@ class GameSocketTest {
             assertIs<SnapshotEvent>(receiveEvent())
             ws.webSocket(game.socketUrl(started.whiteToken)) {
                 val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
-                sendCommand(MakeMove(GAME_PROTOCOL_VERSION, "m1", snapshot.revision, "e2e4"))
+                sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
                 assertIs<MoveAppliedEvent>(receiveEvent())
             }
             // The black connection first sees PlayerJoined for white, then the broadcast move.
             var event = receiveEvent()
             while (event !is MoveAppliedEvent) event = receiveEvent()
-            assertEquals("e2e4", event.lastMove)
+            assertEquals(OPENING_MOVE, event.lastMove)
         }
     }
 

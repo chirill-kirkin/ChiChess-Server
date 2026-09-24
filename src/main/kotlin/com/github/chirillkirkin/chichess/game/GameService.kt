@@ -25,6 +25,7 @@ data class GameSnapshot(
     val status: GameStatus,
     val revision: Long,
     val fen: String,
+    val lastMove: String? = null,
     val result: GameResult? = null,
     val terminationReason: TerminationReason? = null,
 )
@@ -88,6 +89,7 @@ private fun Game.snapshotFor(color: PieceColor): GameSnapshot = GameSnapshot(
     status = status,
     revision = revision,
     fen = fen,
+    lastMove = lastMove,
     result = result,
     terminationReason = terminationReason,
 )
@@ -167,6 +169,7 @@ class GameService(
             status = newStatus,
             revision = newRevision,
             fen = outcome.fenAfter,
+            lastMove = uci,
             result = outcome.result,
             terminationReason = outcome.terminationReason,
         )

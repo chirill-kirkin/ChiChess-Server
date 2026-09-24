@@ -5,14 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-// Position after 1. f3 e5 2. g4, black to move: d8h4 is Qh4#.
-private const val CHECKMATE_IN_ONE_FEN = "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2"
-
-// White queen on g1, kings on f7/h8: g1g6 leaves black with no legal move and no check.
-private const val STALEMATE_IN_ONE_FEN = "7k/5K2/8/8/8/8/8/6Q1 w - - 0 1"
-
-// White pawn one square from promotion, kings out of the way.
-private const val PROMOTION_FEN = "k7/7P/8/8/8/8/8/7K w - - 0 1"
+private const val PROMOTED_QUEEN = 'Q'
 
 class ChesslibEngineTest {
     private val engine = ChesslibEngine()
@@ -26,15 +19,15 @@ class ChesslibEngineTest {
     @Test
     fun `plyNumber counts half-moves from the starting position`() {
         assertEquals(0, engine.plyNumber(START_FEN))
-        val afterWhite = assertIs<MoveOutcome.Applied>(engine.applyMove(START_FEN, "e2e4")).fenAfter
+        val afterWhite = assertIs<MoveOutcome.Applied>(engine.applyMove(START_FEN, OPENING_MOVE)).fenAfter
         assertEquals(1, engine.plyNumber(afterWhite))
-        val afterBlack = assertIs<MoveOutcome.Applied>(engine.applyMove(afterWhite, "e7e5")).fenAfter
+        val afterBlack = assertIs<MoveOutcome.Applied>(engine.applyMove(afterWhite, OPENING_REPLY)).fenAfter
         assertEquals(2, engine.plyNumber(afterBlack))
     }
 
     @Test
     fun `applyMove advances a legal move and flips the side to move`() {
-        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(START_FEN, "e2e4"))
+        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(START_FEN, OPENING_MOVE))
 
         assertEquals(null, outcome.result)
         assertEquals(null, outcome.terminationReason)
@@ -43,17 +36,17 @@ class ChesslibEngineTest {
 
     @Test
     fun `applyMove rejects an illegal move`() {
-        assertTrue(engine.applyMove(START_FEN, "e2e5") is MoveOutcome.Illegal)
+        assertTrue(engine.applyMove(START_FEN, ILLEGAL_MOVE_UCI) is MoveOutcome.Illegal)
     }
 
     @Test
     fun `applyMove rejects a malformed move`() {
-        assertTrue(engine.applyMove(START_FEN, "zzzz") is MoveOutcome.Illegal)
+        assertTrue(engine.applyMove(START_FEN, MALFORMED_MOVE_UCI) is MoveOutcome.Illegal)
     }
 
     @Test
     fun `applyMove detects checkmate`() {
-        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(CHECKMATE_IN_ONE_FEN, "d8h4"))
+        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(CHECKMATE_IN_ONE_FEN, CHECKMATE_MOVE))
 
         assertEquals(GameResult.BLACK_WON, outcome.result)
         assertEquals(TerminationReason.CHECKMATE, outcome.terminationReason)
@@ -61,7 +54,7 @@ class ChesslibEngineTest {
 
     @Test
     fun `applyMove detects stalemate`() {
-        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(STALEMATE_IN_ONE_FEN, "g1g6"))
+        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(STALEMATE_IN_ONE_FEN, STALEMATE_MOVE))
 
         assertEquals(GameResult.DRAW, outcome.result)
         assertEquals(TerminationReason.STALEMATE, outcome.terminationReason)
@@ -69,9 +62,9 @@ class ChesslibEngineTest {
 
     @Test
     fun `applyMove accepts a promotion`() {
-        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(PROMOTION_FEN, "h7h8q"))
+        val outcome = assertIs<MoveOutcome.Applied>(engine.applyMove(PROMOTION_FEN, PROMOTION_MOVE))
 
         // The promoted queen appears on the board; the source position had none.
-        assertTrue(outcome.fenAfter.contains('Q'))
+        assertTrue(outcome.fenAfter.contains(PROMOTED_QUEEN))
     }
 }

@@ -122,7 +122,7 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
             Games.selectAll()
                 .where { Games.id eq gameId.toString() }
                 .singleOrNull()
-                ?.toGame()
+                ?.let { it.toGame(lastMoveUci(it[Games.id])) }
         }
     }
 
@@ -132,7 +132,7 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
             Games.selectAll()
                 .where { (Games.whiteSessionId eq participant) or (Games.blackSessionId eq participant) }
                 .orderBy(Games.createdAt, SortOrder.DESC)
-                .map { it.toGame() }
+                .map { it.toGame(lastMoveUci(it[Games.id])) }
         }
     }
 
@@ -214,7 +214,7 @@ private fun markCommandProcessed(gameKey: String, commandId: String, now: Long) 
     }
 }
 
-private fun ResultRow.toGame(): Game = Game(
+private fun ResultRow.toGame(lastMove: String?): Game = Game(
     id = UUID.fromString(this[Games.id]),
     inviteCode = this[Games.inviteCode],
     whiteSessionId = this[Games.whiteSessionId]?.let(UUID::fromString),
@@ -222,6 +222,15 @@ private fun ResultRow.toGame(): Game = Game(
     status = GameStatus.valueOf(this[Games.status]),
     revision = this[Games.revision],
     fen = this[Games.fen],
+    lastMove = lastMove,
     result = this[Games.result]?.let(GameResult::valueOf),
     terminationReason = this[Games.terminationReason]?.let(TerminationReason::valueOf),
 )
+
+private fun lastMoveUci(gameKey: String): String? =
+    Moves.selectAll()
+        .where { Moves.gameId eq gameKey }
+        .orderBy(Moves.ply, SortOrder.DESC)
+        .limit(1)
+        .singleOrNull()
+        ?.get(Moves.uci)

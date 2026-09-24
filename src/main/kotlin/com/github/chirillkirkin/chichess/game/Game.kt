@@ -23,6 +23,7 @@ data class Game(
     val status: GameStatus,
     val revision: Long,
     val fen: String,
+    val lastMove: String?,
     val result: GameResult?,
     val terminationReason: TerminationReason?,
 ) {
