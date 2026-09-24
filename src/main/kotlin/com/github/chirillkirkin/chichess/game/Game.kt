@@ -19,6 +19,7 @@ enum class TerminationReason {
     RESIGNATION,
     INSUFFICIENT_MATERIAL,
     SEVENTY_FIVE_MOVE_RULE,
+    FIVEFOLD_REPETITION,
 }
 
 data class Game(

@@ -27,6 +27,11 @@ internal const val INSUFFICIENT_MATERIAL_MOVE = "c5b6"
 internal const val SEVENTY_FIVE_MOVE_FEN = "r6k/8/8/8/8/8/8/2R4K w - - 149 80"
 internal const val SEVENTY_FIVE_MOVE_TRIGGER = "c1c2"
 
+// Both knights out and back returns to the starting position, which recurs once per round.
+internal val KNIGHT_SHUFFLE_ROUND = listOf("g1f3", "g8f6", "f3g1", "f6g8")
+internal const val FIVEFOLD_REPETITION_ROUNDS = 4 // start position occurs five times
+internal const val BELOW_FIVEFOLD_ROUNDS = 2
+
 // Command identifiers are client-generated; the values are arbitrary but distinct per role.
 internal const val MOVE_COMMAND_ID = "move-1"
 internal const val SYNC_COMMAND_ID = "sync-1"

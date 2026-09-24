@@ -30,6 +30,14 @@ class ChesslibEngine : ChessEngine {
         )
     }
 
+    override fun halfMoveClock(fen: String): Int = boardFrom(fen).halfMoveCounter
+
+    override fun isRepetition(moves: List<String>, occurrences: Int): Boolean {
+        val board = Board()
+        moves.forEach { uci -> board.doMove(Move(uci, board.sideToMove)) }
+        return board.isRepetition(occurrences)
+    }
+
     private fun boardFrom(fen: String): Board = Board().apply { loadFromFen(fen) }
 }
 

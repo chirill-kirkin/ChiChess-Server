@@ -136,6 +136,15 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
         }
     }
 
+    override suspend fun movesOf(gameId: UUID): List<String> = withContext(Dispatchers.IO) {
+        transaction(database) {
+            Moves.selectAll()
+                .where { Moves.gameId eq gameId.toString() }
+                .orderBy(Moves.ply, SortOrder.ASC)
+                .map { it[Moves.uci] }
+        }
+    }
+
     override suspend fun isCommandProcessed(gameId: UUID, commandId: String): Boolean =
         withContext(Dispatchers.IO) {
             transaction(database) {

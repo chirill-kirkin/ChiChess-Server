@@ -13,8 +13,8 @@ import kotlin.test.assertTrue
 private const val GAME_TEST_RANDOM_SEED = 73L
 
 class GameServiceTest {
-    private fun service(repository: GameRepository): GameService =
-        GameService(repository, Random(GAME_TEST_RANDOM_SEED), ChesslibEngine(), GameLocks())
+    private fun service(repository: GameRepository, engine: ChessEngine = ChesslibEngine()): GameService =
+        GameService(repository, Random(GAME_TEST_RANDOM_SEED), engine, GameLocks())
 
     @Test
     fun `create generates valid identifiers and persists game`() = runBlocking {
@@ -167,6 +167,38 @@ class GameServiceTest {
     }
 
     @Test
+    fun `submitMove finalizes a game on fivefold repetition`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val engine = AlwaysRepeatingEngine(halfMoveClock = MIN_PLIES_FOR_FIVEFOLD)
+
+        val applied = assertIs<MoveResult.Applied>(
+            service(repository, engine).submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE),
+        )
+
+        assertEquals(GameStatus.FINISHED, applied.snapshot.status)
+        assertEquals(GameResult.DRAW, applied.snapshot.result)
+        assertEquals(TerminationReason.FIVEFOLD_REPETITION, applied.snapshot.terminationReason)
+    }
+
+    @Test
+    fun `submitMove skips the repetition check below the half-move threshold`() = runBlocking {
+        val repository = FakeGameRepository()
+        val white = UUID.randomUUID()
+        val game = repository.seedInProgress(white = white, black = UUID.randomUUID())
+        val engine = AlwaysRepeatingEngine(halfMoveClock = MIN_PLIES_FOR_FIVEFOLD - 1)
+
+        val applied = assertIs<MoveResult.Applied>(
+            service(repository, engine).submitMove(game.id, white, MOVE_COMMAND_ID, INITIAL_REVISION, OPENING_MOVE),
+        )
+
+        // The gate is closed, so the (always-true) repetition check never runs; the game continues.
+        assertEquals(GameStatus.IN_PROGRESS, applied.snapshot.status)
+        assertEquals(null, applied.snapshot.result)
+    }
+
+    @Test
     fun `submitResign finishes the game in favor of the opponent`() = runBlocking {
         val repository = FakeGameRepository()
         val white = UUID.randomUUID()
@@ -190,8 +222,20 @@ class GameServiceTest {
     }
 }
 
+// Reports every position as a fivefold repetition, isolating the service's repetition wiring.
+// The half-move clock is configurable so the fivefold gate can be exercised in both directions.
+private class AlwaysRepeatingEngine(private val halfMoveClock: Int) : ChessEngine {
+    override fun sideToMove(fen: String): PieceColor = PieceColor.WHITE
+    override fun plyNumber(fen: String): Int = 1
+    override fun applyMove(fen: String, uci: String): MoveOutcome =
+        MoveOutcome.Applied(fenAfter = START_FEN, result = null, terminationReason = null)
+    override fun halfMoveClock(fen: String): Int = halfMoveClock
+    override fun isRepetition(moves: List<String>, occurrences: Int): Boolean = true
+}
+
 private class FakeGameRepository : GameRepository {
     private val games = mutableMapOf<UUID, Game>()
+    private val moves = mutableMapOf<UUID, MutableList<String>>()
     private val processedCommands = mutableSetOf<Pair<UUID, String>>()
 
     var createdGameId: UUID? = null
@@ -253,6 +297,8 @@ private class FakeGameRepository : GameRepository {
     override suspend fun findByParticipant(sessionId: UUID): List<Game> =
         games.values.filter { it.colorOf(sessionId) != null }
 
+    override suspend fun movesOf(gameId: UUID): List<String> = moves[gameId].orEmpty()
+
     override suspend fun isCommandProcessed(gameId: UUID, commandId: String): Boolean =
         (gameId to commandId) in processedCommands
 
@@ -269,6 +315,7 @@ private class FakeGameRepository : GameRepository {
         terminationReason: TerminationReason?,
     ) {
         lastRecordedPly = ply
+        moves.getOrPut(gameId) { mutableListOf() }.add(uci)
         games[gameId] = games.getValue(gameId).copy(
             fen = fenAfter,
             lastMove = uci,

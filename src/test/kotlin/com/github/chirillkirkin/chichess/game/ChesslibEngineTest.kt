@@ -2,6 +2,7 @@ package com.github.chirillkirkin.chichess.game
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -86,5 +87,14 @@ class ChesslibEngineTest {
 
         // The promoted queen appears on the board; the source position had none.
         assertTrue(outcome.fenAfter.contains(PROMOTED_QUEEN))
+    }
+
+    @Test
+    fun `isRepetition detects a fivefold repetition of the position`() {
+        val fivefold = List(FIVEFOLD_REPETITION_ROUNDS) { KNIGHT_SHUFFLE_ROUND }.flatten()
+        val belowThreshold = List(BELOW_FIVEFOLD_ROUNDS) { KNIGHT_SHUFFLE_ROUND }.flatten()
+
+        assertTrue(engine.isRepetition(fivefold, FIVEFOLD_REPETITION_OCCURRENCES))
+        assertFalse(engine.isRepetition(belowThreshold, FIVEFOLD_REPETITION_OCCURRENCES))
     }
 }

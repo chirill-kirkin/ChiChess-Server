@@ -8,6 +8,13 @@ internal const val INVITE_CODE_LENGTH = 10
 internal const val INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 internal const val INITIAL_REVISION = 0L
 
+// Shortest cycle that returns to the same position (both sides move a piece out and back).
+private const val SHORTEST_REPETITION_CYCLE_PLIES = 4
+
+// A fivefold repetition needs four such cycles, so a lower half-move clock rules it out outright.
+internal const val MIN_PLIES_FOR_FIVEFOLD =
+    (FIVEFOLD_REPETITION_OCCURRENCES - 1) * SHORTEST_REPETITION_CYCLE_PLIES
+
 @Serializable
 data class CreateGameResponse(val gameId: String, val inviteCode: String)
 
@@ -60,6 +67,7 @@ interface GameRepository {
     suspend fun join(inviteCode: String, joiningSessionId: UUID): JoinGameResult
     suspend fun findById(gameId: UUID): Game?
     suspend fun findByParticipant(sessionId: UUID): List<Game>
+    suspend fun movesOf(gameId: UUID): List<String>
     suspend fun isCommandProcessed(gameId: UUID, commandId: String): Boolean
     suspend fun recordMove(
         gameId: UUID,
@@ -151,8 +159,20 @@ class GameService(
         val outcome = engine.applyMove(game.fen, uci)
         if (outcome !is MoveOutcome.Applied) return@withGameLock MoveResult.IllegalMove
 
+        var result = outcome.result
+        var terminationReason = outcome.terminationReason
+        // Position-based rules can't see repetition; the half-move clock cheaply rules out a
+        // fivefold before paying for the history replay.
+        if (result == null &&
+            engine.halfMoveClock(outcome.fenAfter) >= MIN_PLIES_FOR_FIVEFOLD &&
+            engine.isRepetition(repository.movesOf(gameId) + uci, FIVEFOLD_REPETITION_OCCURRENCES)
+        ) {
+            result = GameResult.DRAW
+            terminationReason = TerminationReason.FIVEFOLD_REPETITION
+        }
+
         val newRevision = game.revision + 1
-        val newStatus = if (outcome.result != null) GameStatus.FINISHED else GameStatus.IN_PROGRESS
+        val newStatus = if (result != null) GameStatus.FINISHED else GameStatus.IN_PROGRESS
         repository.recordMove(
             gameId = gameId,
             movedBySessionId = sessionId,
@@ -162,16 +182,16 @@ class GameService(
             fenAfter = outcome.fenAfter,
             newRevision = newRevision,
             newStatus = newStatus,
-            result = outcome.result,
-            terminationReason = outcome.terminationReason,
+            result = result,
+            terminationReason = terminationReason,
         )
         val updated = game.copy(
             status = newStatus,
             revision = newRevision,
             fen = outcome.fenAfter,
             lastMove = uci,
-            result = outcome.result,
-            terminationReason = outcome.terminationReason,
+            result = result,
+            terminationReason = terminationReason,
         )
         MoveResult.Applied(updated.snapshotFor(color))
     }
