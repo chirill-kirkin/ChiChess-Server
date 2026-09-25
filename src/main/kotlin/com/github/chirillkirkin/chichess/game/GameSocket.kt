@@ -1,6 +1,8 @@
 package com.github.chirillkirkin.chichess.game
 
-import com.github.chirillkirkin.chichess.session.GuestSessionService
+import com.github.chirillkirkin.chichess.config.GUEST_AUTHENTICATION
+import com.github.chirillkirkin.chichess.config.guestSessionId
+import io.ktor.server.auth.authenticate
 import io.ktor.server.routing.Route
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
@@ -11,54 +13,44 @@ import java.util.UUID
 import kotlinx.serialization.SerializationException
 
 const val GAME_SOCKET_ROUTE = "$GAME_ROUTE/{$GAME_ID_PARAMETER}"
-const val GAME_SOCKET_TOKEN_PARAMETER = "token"
-const val UNAUTHORIZED_CODE = "UNAUTHORIZED"
 
-private const val CLOSE_UNAUTHORIZED: Short = 4401
 private const val CLOSE_FORBIDDEN: Short = 4403
 private const val CLOSE_NOT_FOUND: Short = 4404
 
-fun Route.gameWebSocket(
-    games: GameService,
-    connections: GameConnections,
-    guestSessions: GuestSessionService,
-) {
-    webSocket(GAME_SOCKET_ROUTE) {
-        val token = call.request.queryParameters[GAME_SOCKET_TOKEN_PARAMETER]
-        val sessionId = token?.let { guestSessions.findSessionIdByToken(it) }
-        if (sessionId == null) {
-            close(CloseReason(CLOSE_UNAUTHORIZED, UNAUTHORIZED_CODE))
-            return@webSocket
-        }
-        val gameId = call.parameters[GAME_ID_PARAMETER]?.let(::parseUuidOrNull)
-        if (gameId == null) {
-            close(CloseReason(CLOSE_NOT_FOUND, GAME_NOT_FOUND_CODE))
-            return@webSocket
-        }
-        val snapshot = when (val result = games.snapshot(gameId, sessionId)) {
-            is GameSnapshotResult.Success -> result.snapshot
-            GameSnapshotResult.NotParticipant -> {
-                close(CloseReason(CLOSE_FORBIDDEN, NOT_A_GAME_PARTICIPANT_CODE))
-                return@webSocket
-            }
-            GameSnapshotResult.NotFound -> {
+fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
+    authenticate(GUEST_AUTHENTICATION) {
+        webSocket(GAME_SOCKET_ROUTE) {
+            val sessionId = call.guestSessionId()
+            val gameId = call.parameters[GAME_ID_PARAMETER]?.let(::parseUuidOrNull)
+            if (gameId == null) {
                 close(CloseReason(CLOSE_NOT_FOUND, GAME_NOT_FOUND_CODE))
                 return@webSocket
             }
-        }
-
-        val connection = GameConnection(sessionId, this)
-        connections.register(gameId, connection)
-        try {
-            connection.send(SnapshotEvent(snapshot))
-            connections.broadcast(gameId, PlayerJoinedEvent(snapshot.yourColor), except = connection)
-            for (frame in incoming) {
-                if (frame is Frame.Text) {
-                    handleCommand(frame.readText(), games, connections, gameId, sessionId, connection)
+            val snapshot = when (val result = games.snapshot(gameId, sessionId)) {
+                is GameSnapshotResult.Success -> result.snapshot
+                GameSnapshotResult.NotParticipant -> {
+                    close(CloseReason(CLOSE_FORBIDDEN, NOT_A_GAME_PARTICIPANT_CODE))
+                    return@webSocket
+                }
+                GameSnapshotResult.NotFound -> {
+                    close(CloseReason(CLOSE_NOT_FOUND, GAME_NOT_FOUND_CODE))
+                    return@webSocket
                 }
             }
-        } finally {
-            connections.unregister(gameId, connection)
+
+            val connection = GameConnection(sessionId, this)
+            connections.register(gameId, connection)
+            try {
+                connection.send(SnapshotEvent(snapshot))
+                connections.broadcast(gameId, PlayerJoinedEvent(snapshot.yourColor), except = connection)
+                for (frame in incoming) {
+                    if (frame is Frame.Text) {
+                        handleCommand(frame.readText(), games, connections, gameId, sessionId, connection)
+                    }
+                }
+            } finally {
+                connections.unregister(gameId, connection)
+            }
         }
     }
 }

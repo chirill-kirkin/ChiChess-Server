@@ -9,6 +9,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.bearerAuth
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.ktor.websocket.Frame
@@ -16,6 +17,7 @@ import io.ktor.websocket.readText
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertIs
 
 private const val WRONG_PROTOCOL_VERSION = 999
@@ -23,7 +25,7 @@ private const val WRONG_PROTOCOL_VERSION = 999
 class GameSocketTest {
     @Test
     fun `connecting participant receives a snapshot`() = testGame { game, ws ->
-        ws.webSocket(game.socketUrl(game.creator.token)) {
+        ws.gameSocket(game.gameId, game.creator.token) {
             val event = assertIs<SnapshotEvent>(receiveEvent())
             assertEquals(game.gameId, event.snapshot.gameId)
             assertEquals(GameStatus.WAITING_FOR_OPPONENT, event.snapshot.status)
@@ -31,15 +33,14 @@ class GameSocketTest {
     }
 
     @Test
-    fun `connecting without a token is rejected`() = testGame { game, ws ->
-        ws.webSocket(game.socketUrl(token = null)) {
-            assertEquals(CLOSE_UNAUTHORIZED, closeReason.await()?.code)
-        }
+    fun `connecting without a token fails the handshake`() = testGame { game, ws ->
+        // Missing bearer -> 401 on the upgrade, so the socket never opens.
+        assertFails { ws.gameSocket(game.gameId, token = null) {} }
     }
 
     @Test
     fun `connecting to an unknown game is rejected`() = testGame { game, ws ->
-        ws.webSocket("$GAME_ROUTE/${UUID.randomUUID()}?$GAME_SOCKET_TOKEN_PARAMETER=${game.creator.token}") {
+        ws.gameSocket(UUID.randomUUID().toString(), game.creator.token) {
             assertEquals(CLOSE_NOT_FOUND, closeReason.await()?.code)
         }
     }
@@ -48,14 +49,14 @@ class GameSocketTest {
     fun `non-participant is rejected`() = testGame { game, ws ->
         val outsider = ws.createGuestSession()
 
-        ws.webSocket(game.socketUrl(outsider.token)) {
+        ws.gameSocket(game.gameId, outsider.token) {
             assertEquals(CLOSE_FORBIDDEN, closeReason.await()?.code)
         }
     }
 
     @Test
     fun `request sync returns a fresh snapshot`() = testGame { game, ws ->
-        ws.webSocket(game.socketUrl(game.creator.token)) {
+        ws.gameSocket(game.gameId, game.creator.token) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(RequestSync(GAME_PROTOCOL_VERSION, commandId = SYNC_COMMAND_ID))
             assertIs<SnapshotEvent>(receiveEvent())
@@ -64,7 +65,7 @@ class GameSocketTest {
 
     @Test
     fun `unsupported protocol version is rejected`() = testGame { game, ws ->
-        ws.webSocket(game.socketUrl(game.creator.token)) {
+        ws.gameSocket(game.gameId, game.creator.token) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(RequestSync(WRONG_PROTOCOL_VERSION, commandId = SYNC_COMMAND_ID))
             val rejected = assertIs<CommandRejectedEvent>(receiveEvent())
@@ -74,7 +75,7 @@ class GameSocketTest {
 
     @Test
     fun `malformed command is rejected`() = testGame { game, ws ->
-        ws.webSocket(game.socketUrl(game.creator.token)) {
+        ws.gameSocket(game.gameId, game.creator.token) {
             assertIs<SnapshotEvent>(receiveEvent())
             send(Frame.Text(MALFORMED_COMMAND_TEXT))
             val rejected = assertIs<CommandRejectedEvent>(receiveEvent())
@@ -87,9 +88,9 @@ class GameSocketTest {
         val joiner = ws.createGuestSession()
         ws.postJoinGame(game.inviteCode, joiner.token)
 
-        ws.webSocket(game.socketUrl(game.creator.token)) {
+        ws.gameSocket(game.gameId, game.creator.token) {
             assertIs<SnapshotEvent>(receiveEvent())
-            ws.webSocket(game.socketUrl(joiner.token)) {
+            ws.gameSocket(game.gameId, joiner.token) {
                 assertIs<SnapshotEvent>(receiveEvent())
             }
             assertIs<PlayerJoinedEvent>(receiveEvent())
@@ -99,7 +100,7 @@ class GameSocketTest {
     @Test
     fun `white player makes a legal move`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
             val applied = assertIs<MoveAppliedEvent>(receiveEvent())
@@ -112,7 +113,7 @@ class GameSocketTest {
     @Test
     fun `snapshot restores the last move after a sync`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             assertEquals(null, snapshot.lastMove)
             sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
@@ -126,7 +127,7 @@ class GameSocketTest {
     @Test
     fun `move with a stale revision is rejected`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision + STALE_REVISION_OFFSET, OPENING_MOVE))
             assertEquals(REVISION_CONFLICT_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
@@ -137,7 +138,7 @@ class GameSocketTest {
     @Test
     fun `illegal move is rejected`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, ILLEGAL_MOVE_UCI))
             assertEquals(ILLEGAL_MOVE_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
@@ -147,7 +148,7 @@ class GameSocketTest {
     @Test
     fun `moving out of turn is rejected`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.blackToken)) {
+        ws.gameSocket(game.gameId, started.blackToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_REPLY))
             assertEquals(NOT_YOUR_TURN_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
@@ -157,7 +158,7 @@ class GameSocketTest {
     @Test
     fun `resigning finishes the game`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(Resign(GAME_PROTOCOL_VERSION, RESIGN_COMMAND_ID, snapshot.revision))
             val finished = assertIs<GameFinishedEvent>(receiveEvent())
@@ -169,7 +170,7 @@ class GameSocketTest {
     @Test
     fun `duplicate move command is ignored`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(MakeMove(GAME_PROTOCOL_VERSION, DUPLICATE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
             val applied = assertIs<MoveAppliedEvent>(receiveEvent())
@@ -182,9 +183,9 @@ class GameSocketTest {
     @Test
     fun `both players receive an applied move`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.blackToken)) {
+        ws.gameSocket(game.gameId, started.blackToken) {
             assertIs<SnapshotEvent>(receiveEvent())
-            ws.webSocket(game.socketUrl(started.whiteToken)) {
+            ws.gameSocket(game.gameId, started.whiteToken) {
                 val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
                 sendCommand(MakeMove(GAME_PROTOCOL_VERSION, MOVE_COMMAND_ID, snapshot.revision, OPENING_MOVE))
                 assertIs<MoveAppliedEvent>(receiveEvent())
@@ -199,7 +200,7 @@ class GameSocketTest {
     @Test
     fun `offering a draw notifies the player and persists for reconnect`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(OfferDraw(GAME_PROTOCOL_VERSION, OFFER_COMMAND_ID))
             assertEquals(PieceColor.WHITE, assertIs<DrawOfferedEvent>(receiveEvent()).by)
@@ -212,12 +213,12 @@ class GameSocketTest {
     @Test
     fun `accepting a draw finishes the game by agreement`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(OfferDraw(GAME_PROTOCOL_VERSION, OFFER_COMMAND_ID))
             assertIs<DrawOfferedEvent>(receiveEvent())
         }
-        ws.webSocket(game.socketUrl(started.blackToken)) {
+        ws.gameSocket(game.gameId, started.blackToken) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(AcceptDraw(GAME_PROTOCOL_VERSION, ACCEPT_COMMAND_ID))
             val finished = assertIs<GameFinishedEvent>(receiveEvent())
@@ -229,12 +230,12 @@ class GameSocketTest {
     @Test
     fun `declining a draw notifies the player`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(OfferDraw(GAME_PROTOCOL_VERSION, OFFER_COMMAND_ID))
             assertIs<DrawOfferedEvent>(receiveEvent())
         }
-        ws.webSocket(game.socketUrl(started.blackToken)) {
+        ws.gameSocket(game.gameId, started.blackToken) {
             assertIs<SnapshotEvent>(receiveEvent())
             sendCommand(DeclineDraw(GAME_PROTOCOL_VERSION, DECLINE_COMMAND_ID))
             assertIs<DrawDeclinedEvent>(receiveEvent())
@@ -244,7 +245,7 @@ class GameSocketTest {
     @Test
     fun `claiming a draw with no grounds is rejected`() = testGame { game, ws ->
         val started = ws.startGame(game)
-        ws.webSocket(game.socketUrl(started.whiteToken)) {
+        ws.gameSocket(game.gameId, started.whiteToken) {
             val snapshot = assertIs<SnapshotEvent>(receiveEvent()).snapshot
             sendCommand(ClaimDraw(GAME_PROTOCOL_VERSION, CLAIM_COMMAND_ID, snapshot.revision))
             assertEquals(DRAW_NOT_CLAIMABLE_CODE, assertIs<CommandRejectedEvent>(receiveEvent()).code)
@@ -280,17 +281,17 @@ class GameSocketTest {
         val gameId: String,
         val inviteCode: String,
         val creator: GuestSessionResponse,
-    ) {
-        fun socketUrl(token: String?): String {
-            val query = token?.let { "?$GAME_SOCKET_TOKEN_PARAMETER=$it" }.orEmpty()
-            return "$GAME_ROUTE/$gameId$query"
-        }
-    }
+    )
 }
 
-private const val CLOSE_UNAUTHORIZED: Short = 4401
 private const val CLOSE_FORBIDDEN: Short = 4403
 private const val CLOSE_NOT_FOUND: Short = 4404
+
+private suspend fun HttpClient.gameSocket(
+    gameId: String,
+    token: String?,
+    block: suspend DefaultClientWebSocketSession.() -> Unit,
+) = webSocket("$GAME_ROUTE/$gameId", request = { token?.let(::bearerAuth) }, block = block)
 
 private suspend fun DefaultClientWebSocketSession.receiveEvent(): GameEvent {
     val frame = incoming.receive() as Frame.Text

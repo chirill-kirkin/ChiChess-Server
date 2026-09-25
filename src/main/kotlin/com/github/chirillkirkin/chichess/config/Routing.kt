@@ -18,6 +18,6 @@ fun Application.configureRouting() {
     routing {
         guestSessionRoutes(guestSessions)
         gameRoutes(games)
-        gameWebSocket(games, connections, guestSessions)
+        gameWebSocket(games, connections)
     }
 }
