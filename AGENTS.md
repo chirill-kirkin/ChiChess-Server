@@ -79,13 +79,14 @@ GET  /games/history         # -> caller's games as a GameSnapshot list
 ## WebSocket protocol
 
 ```
-WS   /game/{id}?token=...    # live game channel for a participant
+WS   /game/{id}              # live game channel for a participant
 ```
 
-- Auth: `token` is passed as a query parameter (WebSocket carries no bearer header).
-  Non-participant / unknown game / bad token close the socket with an application close
-  code (`4401` unauthorized, `4403` not a participant, `4404` not found) whose reason is
-  the domain code.
+- Auth: the opaque Bearer token is sent in the `Authorization` header of the upgrade request
+  (guest bearer auth, same as the HTTP routes). A missing or invalid token fails the handshake
+  with `401` before the socket opens. After the upgrade, a non-participant or unknown game closes
+  the socket with an application close code (`4403` not a participant, `4404` not found) whose
+  reason is the domain code.
 - Messages are JSON with a `"type"` discriminator. Every command carries `protocolVersion`
   and `commandId`.
 - Commands (client -> server): `REQUEST_SYNC`; `MAKE_MOVE` (`expectedRevision`, `uci`);
