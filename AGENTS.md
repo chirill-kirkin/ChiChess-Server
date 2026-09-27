@@ -16,11 +16,13 @@ only from the server.
 
 - **Kotlin/JVM 21** (toolchain managed by Gradle), Kotlin official code style.
 - **Ktor + Netty** — explicit `embeddedServer` entry point. Default port `8080`,
-  overridable via the `PORT` env var.
+  overridable via the `PORT` env var. `LOG_LEVEL` (default `INFO`) sets the level of the
+  app package `com.github.chirillkirkin`; set it to `DEBUG` for the full WebSocket/command trace.
 - **SQLite + Exposed** for persistence (`jdbc:sqlite:./chichess.db`).
 - **Koin** for dependency injection.
 - **kotlinx.serialization** JSON.
-- Ktor **Authentication** (Bearer) + **WebSockets**, **StatusPages** for errors, logback.
+- Ktor **Authentication** (Bearer) + **WebSockets**, **StatusPages** for errors,
+  **CallLogging** for HTTP request lines, logback.
 
 ## Structure
 
@@ -72,8 +74,11 @@ GET  /games/history         # -> caller's games as a GameSnapshot list
   player to join. Colors (`white`/`black`) are assigned randomly.
 - `GameSnapshot` is the per-caller restore format: `yourColor`, `status`, `revision`, `fen`,
   `lastMove`, `pendingDrawOfferBy`, and `result`/`terminationReason` once finished.
-- Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED`. The joining
-  player fills the empty color slot under a `<color>_session_id IS NULL` guard (race protection).
+- Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED` (two players,
+  still playing), `GAME_FINISHED` (the game is over). The joining player fills the empty color
+  slot under a `<color>_session_id IS NULL` guard (race protection). Join only succeeds while the
+  game is `WAITING_FOR_OPPONENT`; a participant returning to a live or finished game reconnects by
+  `gameId` (snapshot / WebSocket), not by invite code.
 - Read errors: `GAME_NOT_FOUND` (404), `NOT_A_GAME_PARTICIPANT` (403).
 
 ## WebSocket protocol
