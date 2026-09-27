@@ -50,6 +50,7 @@ sealed interface JoinGameResult {
     data object NotFound : JoinGameResult
     data object OwnGame : JoinGameResult
     data object AlreadyJoined : JoinGameResult
+    data object Finished : JoinGameResult
 }
 
 sealed interface GameSnapshotResult {

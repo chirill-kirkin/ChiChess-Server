@@ -70,6 +70,38 @@ class GameJoiningTest {
     }
 
     @Test
+    fun `participant rejoining full game gets already joined`() = testGameJoining { game ->
+        val joiningPlayer = client.createGuestSession()
+        client.postJoinGame(game.inviteCode, joiningPlayer.token)
+
+        // Colors are random, so one of these two holds the white slot. Neither may be treated as
+        // "your own game": once both slots are filled the answer is always GAME_ALREADY_JOINED.
+        val joinerRejoin = client.postJoinGame(game.inviteCode, joiningPlayer.token)
+        val creatorRejoin = client.postJoinGame(game.inviteCode, game.creator.token)
+
+        assertError(joinerRejoin, HttpStatusCode.Conflict, GAME_ALREADY_JOINED_CODE)
+        assertError(creatorRejoin, HttpStatusCode.Conflict, GAME_ALREADY_JOINED_CODE)
+    }
+
+    @Test
+    fun `joining finished game reports game finished`() = testGameJoining { game ->
+        val joiningPlayer = client.createGuestSession()
+        client.postJoinGame(game.inviteCode, joiningPlayer.token)
+        withDatabaseConnection(game.databaseUrl) { connection ->
+            val finishGame = "UPDATE ${Games.tableName} SET ${Games.status.name} = ? WHERE ${Games.id.name} = ?"
+            connection.prepareStatement(finishGame).use { statement ->
+                statement.setString(1, GameStatus.FINISHED.name)
+                statement.setString(2, game.gameId)
+                statement.executeUpdate()
+            }
+        }
+
+        val response = client.postJoinGame(game.inviteCode, joiningPlayer.token)
+
+        assertError(response, HttpStatusCode.Conflict, GAME_FINISHED_CODE)
+    }
+
+    @Test
     fun `third guest cannot join occupied game`() = testGameJoining { game ->
         val joiningPlayer = client.createGuestSession()
         val thirdPlayer = client.createGuestSession()

@@ -48,6 +48,10 @@ fun Route.gameRoutes(games: GameService) {
                     HttpStatusCode.Conflict,
                     ApiErrorResponse(GAME_ALREADY_JOINED_CODE),
                 )
+                JoinGameResult.Finished -> call.respond(
+                    HttpStatusCode.Conflict,
+                    ApiErrorResponse(GAME_FINISHED_CODE),
+                )
             }
         }
         get(GAME_BY_ID_ROUTE) {
