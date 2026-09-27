@@ -1,5 +1,6 @@
 package com.github.chirillkirkin.chichess
 
+import com.github.chirillkirkin.chichess.config.configureCallLogging
 import com.github.chirillkirkin.chichess.config.configureExposed
 import com.github.chirillkirkin.chichess.config.configureErrorHandling
 import com.github.chirillkirkin.chichess.config.configureGuestAuthentication
@@ -31,6 +32,7 @@ fun main() {
 
 fun Application.module() {
     configureSerialization()
+    configureCallLogging()
     configureErrorHandling()
     val database = configureExposed()
     configureKoin(database)

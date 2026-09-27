@@ -11,11 +11,14 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import java.util.UUID
 import kotlinx.serialization.SerializationException
+import org.slf4j.LoggerFactory
 
 const val GAME_SOCKET_ROUTE = "$GAME_ROUTE/{$GAME_ID_PARAMETER}"
 
 private const val CLOSE_FORBIDDEN: Short = 4403
 private const val CLOSE_NOT_FOUND: Short = 4404
+
+private val logger = LoggerFactory.getLogger("com.github.chirillkirkin.chichess.game.GameSocket")
 
 fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
     authenticate(GUEST_AUTHENTICATION) {
@@ -23,16 +26,19 @@ fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
             val sessionId = call.guestSessionId()
             val gameId = call.parameters[GAME_ID_PARAMETER]?.let(::parseUuidOrNull)
             if (gameId == null) {
+                logger.info("WebSocket handshake rejected: unparseable gameId, session={}", sessionId)
                 close(CloseReason(CLOSE_NOT_FOUND, GAME_NOT_FOUND_CODE))
                 return@webSocket
             }
             val snapshot = when (val result = games.snapshot(gameId, sessionId)) {
                 is GameSnapshotResult.Success -> result.snapshot
                 GameSnapshotResult.NotParticipant -> {
+                    logger.info("WebSocket handshake rejected: session={} not a participant of game={}", sessionId, gameId)
                     close(CloseReason(CLOSE_FORBIDDEN, NOT_A_GAME_PARTICIPANT_CODE))
                     return@webSocket
                 }
                 GameSnapshotResult.NotFound -> {
+                    logger.info("WebSocket handshake rejected: game={} not found (session={})", gameId, sessionId)
                     close(CloseReason(CLOSE_NOT_FOUND, GAME_NOT_FOUND_CODE))
                     return@webSocket
                 }
@@ -40,6 +46,7 @@ fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
 
             val connection = GameConnection(sessionId, this)
             connections.register(gameId, connection)
+            logger.info("WebSocket connected: game={} session={} color={}", gameId, sessionId, snapshot.yourColor)
             try {
                 connection.send(SnapshotEvent(snapshot))
                 connections.broadcast(gameId, PlayerJoinedEvent(snapshot.yourColor), except = connection)
@@ -50,6 +57,7 @@ fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
                 }
             } finally {
                 connections.unregister(gameId, connection)
+                logger.info("WebSocket disconnected: game={} session={}", gameId, sessionId)
             }
         }
     }
@@ -66,11 +74,19 @@ private suspend fun handleCommand(
     val command = try {
         gameProtocolJson.decodeFromString<GameCommand>(text)
     } catch (_: SerializationException) {
+        logger.debug("Malformed command from session={} game={}", sessionId, gameId)
         connection.send(CommandRejectedEvent(commandId = null, code = MALFORMED_COMMAND_CODE))
         return
     }
+    logger.debug("Command {} received: game={} session={} id={}", command::class.simpleName, gameId, sessionId, command.commandId)
+
+    suspend fun reject(code: String) {
+        logger.debug("Command {} rejected: game={} session={} id={} code={}", command::class.simpleName, gameId, sessionId, command.commandId, code)
+        connection.send(CommandRejectedEvent(command.commandId, code))
+    }
+
     if (command.protocolVersion != GAME_PROTOCOL_VERSION) {
-        connection.send(CommandRejectedEvent(command.commandId, UNSUPPORTED_PROTOCOL_VERSION_CODE))
+        reject(UNSUPPORTED_PROTOCOL_VERSION_CODE)
         return
     }
     when (command) {
@@ -86,13 +102,13 @@ private suspend fun handleCommand(
                 is MoveResult.Applied ->
                     connections.broadcast(gameId, result.snapshot.toMoveApplied(command.uci))
                 is MoveResult.RevisionConflict -> {
-                    connection.send(CommandRejectedEvent(command.commandId, REVISION_CONFLICT_CODE))
+                    reject(REVISION_CONFLICT_CODE)
                     connection.send(SnapshotEvent(result.snapshot))
                 }
                 is MoveResult.DuplicateCommand ->
                     result.snapshot?.let { connection.send(SnapshotEvent(it)) }
                 else ->
-                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+                    reject(result.rejectionCode())
             }
         }
         is Resign -> {
@@ -103,7 +119,7 @@ private suspend fun handleCommand(
                 is MoveResult.DuplicateCommand ->
                     result.snapshot?.let { connection.send(SnapshotEvent(it)) }
                 else ->
-                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+                    reject(result.rejectionCode())
             }
         }
         is OfferDraw -> {
@@ -114,7 +130,7 @@ private suspend fun handleCommand(
                 is MoveResult.DuplicateCommand ->
                     result.snapshot?.let { connection.send(SnapshotEvent(it)) }
                 else ->
-                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+                    reject(result.rejectionCode())
             }
         }
         is AcceptDraw -> {
@@ -125,7 +141,7 @@ private suspend fun handleCommand(
                 is MoveResult.DuplicateCommand ->
                     result.snapshot?.let { connection.send(SnapshotEvent(it)) }
                 else ->
-                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+                    reject(result.rejectionCode())
             }
         }
         is DeclineDraw -> {
@@ -136,7 +152,7 @@ private suspend fun handleCommand(
                 is MoveResult.DuplicateCommand ->
                     result.snapshot?.let { connection.send(SnapshotEvent(it)) }
                 else ->
-                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+                    reject(result.rejectionCode())
             }
         }
         is ClaimDraw -> {
@@ -145,13 +161,13 @@ private suspend fun handleCommand(
                 is MoveResult.Applied ->
                     connections.broadcast(gameId, result.snapshot.toGameFinished())
                 is MoveResult.RevisionConflict -> {
-                    connection.send(CommandRejectedEvent(command.commandId, REVISION_CONFLICT_CODE))
+                    reject(REVISION_CONFLICT_CODE)
                     connection.send(SnapshotEvent(result.snapshot))
                 }
                 is MoveResult.DuplicateCommand ->
                     result.snapshot?.let { connection.send(SnapshotEvent(it)) }
                 else ->
-                    connection.send(CommandRejectedEvent(command.commandId, result.rejectionCode()))
+                    reject(result.rejectionCode())
             }
         }
     }
