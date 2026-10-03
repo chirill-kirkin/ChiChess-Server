@@ -65,7 +65,7 @@ Feature code follows the `service` / `repository` / `routes` split per feature p
 ```
 POST /sessions/guest        # -> sessionId + opaque Bearer token
 POST /game                  # create; -> gameId + 10-char invite code
-POST /game/join             # body {"inviteCode":"..."}; joins by invite code
+POST /game/join             # body {"inviteCode":"..."}; -> gameId; joins by invite code
 GET  /game/{id}             # -> GameSnapshot for a participant
 GET  /games/history         # -> caller's games as a GameSnapshot list
 ```
@@ -74,11 +74,13 @@ GET  /games/history         # -> caller's games as a GameSnapshot list
   player to join. Colors (`white`/`black`) are assigned randomly.
 - `GameSnapshot` is the per-caller restore format: `yourColor`, `status`, `revision`, `fen`,
   `lastMove`, `pendingDrawOfferBy`, and `result`/`terminationReason` once finished.
-- Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME`, `GAME_ALREADY_JOINED` (two players,
-  still playing), `GAME_FINISHED` (the game is over). The joining player fills the empty color
-  slot under a `<color>_session_id IS NULL` guard (race protection). Join only succeeds while the
-  game is `WAITING_FOR_OPPONENT`; a participant returning to a live or finished game reconnects by
-  `gameId` (snapshot / WebSocket), not by invite code.
+- Join response: `{"gameId":"..."}`. A participant who reuses the invite code of a full game (live
+  or finished) gets the same response and the server changes nothing, so the client can reconnect
+  (snapshot / WebSocket).
+- Join errors: `GAME_NOT_FOUND`, `CANNOT_JOIN_OWN_GAME` (creator, opponent not yet joined),
+  `GAME_ALREADY_JOINED` (two players, still playing, caller is a stranger), `GAME_FINISHED` (the
+  game is over, caller is a stranger). The joining player fills the empty color slot under a
+  `<color>_session_id IS NULL` guard (race protection).
 - Read errors: `GAME_NOT_FOUND` (404), `NOT_A_GAME_PARTICIPANT` (403).
 
 ## WebSocket protocol
@@ -97,8 +99,11 @@ WS   /game/{id}              # live game channel for a participant
 - Commands (client -> server): `REQUEST_SYNC`; `MAKE_MOVE` (`expectedRevision`, `uci`);
   `RESIGN` (`expectedRevision`, ignored — resignation is unconditional); `OFFER_DRAW`,
   `ACCEPT_DRAW`, `DECLINE_DRAW` (no `expectedRevision`); `CLAIM_DRAW` (`expectedRevision`).
-- Events (server -> client): `SNAPSHOT` (on connect and `REQUEST_SYNC`); `PLAYER_JOINED`
-  (a participant connected); `MOVE_APPLIED` and `GAME_FINISHED` (color-neutral state
+- Events (server -> client): `SNAPSHOT` (on connect and `REQUEST_SYNC`; carries `snapshot` and
+  `opponentConnected` — the opponent's live presence, which the client starts from and then updates
+  from `PLAYER_JOINED` / `PLAYER_LEFT`); `PLAYER_JOINED`
+  (a participant connected, including a returning one); `PLAYER_LEFT` (a participant's last
+  socket closed); both carry `color` and go to the other connections; `MOVE_APPLIED` and `GAME_FINISHED` (color-neutral state
   deltas, broadcast to all); `DRAW_OFFERED` (`by`) and `DRAW_DECLINED`; `COMMAND_REJECTED`
   (`code`, to the sender).
 - Mutations run under a per-game lock; `expectedRevision != revision` -> `COMMAND_REJECTED`
