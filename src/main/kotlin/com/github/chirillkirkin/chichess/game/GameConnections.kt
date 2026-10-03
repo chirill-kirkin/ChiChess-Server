@@ -11,6 +11,7 @@ private val logger = LoggerFactory.getLogger("com.github.chirillkirkin.chichess.
 
 class GameConnection(
     val sessionId: UUID,
+    val color: PieceColor,
     private val socket: WebSocketSession,
 ) {
     // One WebSocket is a single byte stream; serialize writes so concurrent sends cannot interleave frames.
@@ -31,14 +32,18 @@ class GameConnections {
         logger.debug("Connection registered: game={} session={} live={}", gameId, connection.sessionId, connections.size)
     }
 
-    suspend fun unregister(gameId: UUID, connection: GameConnection) = lock.withLock {
-        val connections = byGame[gameId] ?: return@withLock
+    suspend fun unregister(gameId: UUID, connection: GameConnection): Boolean = lock.withLock {
+        val connections = byGame[gameId] ?: return@withLock false
         connections.remove(connection)
         logger.debug("Connection unregistered: game={} session={} live={}", gameId, connection.sessionId, connections.size)
         if (connections.isEmpty()) byGame.remove(gameId)
+        connections.none { it.sessionId == connection.sessionId }
     }
 
-    /** Sends [event] to every connection of [gameId], optionally skipping [except]. */
+    suspend fun isConnected(gameId: UUID, color: PieceColor): Boolean = lock.withLock {
+        byGame[gameId]?.any { it.color == color } == true
+    }
+
     suspend fun broadcast(gameId: UUID, event: GameEvent, except: GameConnection? = null) {
         val targets = lock.withLock { byGame[gameId]?.toList().orEmpty() }.filter { it != except }
         logger.debug("Broadcasting {}: game={} targets={}", event::class.simpleName, gameId, targets.size)

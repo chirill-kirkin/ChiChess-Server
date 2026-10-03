@@ -86,11 +86,15 @@ sealed interface GameEvent
 
 @Serializable
 @SerialName("SNAPSHOT")
-data class SnapshotEvent(val snapshot: GameSnapshot) : GameEvent
+data class SnapshotEvent(val snapshot: GameSnapshot, val opponentConnected: Boolean) : GameEvent
 
 @Serializable
 @SerialName("PLAYER_JOINED")
 data class PlayerJoinedEvent(val color: PieceColor) : GameEvent
+
+@Serializable
+@SerialName("PLAYER_LEFT")
+data class PlayerLeftEvent(val color: PieceColor) : GameEvent
 
 @Serializable
 @SerialName("MOVE_APPLIED")

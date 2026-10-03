@@ -6,6 +6,12 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class PieceColor { WHITE, BLACK }
 
+val PieceColor.opponent: PieceColor
+    get() = when (this) {
+        PieceColor.WHITE -> PieceColor.BLACK
+        PieceColor.BLACK -> PieceColor.WHITE
+    }
+
 @Serializable
 enum class GameStatus { WAITING_FOR_OPPONENT, IN_PROGRESS, FINISHED }
 

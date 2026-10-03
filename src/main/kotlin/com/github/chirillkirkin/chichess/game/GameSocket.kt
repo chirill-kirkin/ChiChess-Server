@@ -44,11 +44,11 @@ fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
                 }
             }
 
-            val connection = GameConnection(sessionId, this)
+            val connection = GameConnection(sessionId, snapshot.yourColor, this)
             connections.register(gameId, connection)
             logger.info("WebSocket connected: game={} session={} color={}", gameId, sessionId, snapshot.yourColor)
             try {
-                connection.send(SnapshotEvent(snapshot))
+                connections.sendSnapshot(gameId, connection, snapshot)
                 connections.broadcast(gameId, PlayerJoinedEvent(snapshot.yourColor), except = connection)
                 for (frame in incoming) {
                     if (frame is Frame.Text) {
@@ -56,8 +56,9 @@ fun Route.gameWebSocket(games: GameService, connections: GameConnections) {
                     }
                 }
             } finally {
-                connections.unregister(gameId, connection)
-                logger.info("WebSocket disconnected: game={} session={}", gameId, sessionId)
+                val left = connections.unregister(gameId, connection)
+                logger.info("WebSocket disconnected: game={} session={} left={}", gameId, sessionId, left)
+                if (left) connections.broadcast(gameId, PlayerLeftEvent(snapshot.yourColor))
             }
         }
     }
@@ -93,7 +94,7 @@ private suspend fun handleCommand(
         is RequestSync -> {
             val result = games.snapshot(gameId, sessionId)
             if (result is GameSnapshotResult.Success) {
-                connection.send(SnapshotEvent(result.snapshot))
+                connections.sendSnapshot(gameId, connection, result.snapshot)
             }
         }
         is MakeMove -> {
@@ -103,10 +104,10 @@ private suspend fun handleCommand(
                     connections.broadcast(gameId, result.snapshot.toMoveApplied(command.uci))
                 is MoveResult.RevisionConflict -> {
                     reject(REVISION_CONFLICT_CODE)
-                    connection.send(SnapshotEvent(result.snapshot))
+                    connections.sendSnapshot(gameId, connection, result.snapshot)
                 }
                 is MoveResult.DuplicateCommand ->
-                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                    result.snapshot?.let { connections.sendSnapshot(gameId, connection, it) }
                 else ->
                     reject(result.rejectionCode())
             }
@@ -117,7 +118,7 @@ private suspend fun handleCommand(
                 is MoveResult.Applied ->
                     connections.broadcast(gameId, result.snapshot.toGameFinished())
                 is MoveResult.DuplicateCommand ->
-                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                    result.snapshot?.let { connections.sendSnapshot(gameId, connection, it) }
                 else ->
                     reject(result.rejectionCode())
             }
@@ -128,7 +129,7 @@ private suspend fun handleCommand(
                 is MoveResult.Applied ->
                     connections.broadcast(gameId, DrawOfferedEvent(checkNotNull(result.snapshot.pendingDrawOfferBy)))
                 is MoveResult.DuplicateCommand ->
-                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                    result.snapshot?.let { connections.sendSnapshot(gameId, connection, it) }
                 else ->
                     reject(result.rejectionCode())
             }
@@ -139,7 +140,7 @@ private suspend fun handleCommand(
                 is MoveResult.Applied ->
                     connections.broadcast(gameId, result.snapshot.toGameFinished())
                 is MoveResult.DuplicateCommand ->
-                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                    result.snapshot?.let { connections.sendSnapshot(gameId, connection, it) }
                 else ->
                     reject(result.rejectionCode())
             }
@@ -150,7 +151,7 @@ private suspend fun handleCommand(
                 is MoveResult.Applied ->
                     connections.broadcast(gameId, DrawDeclinedEvent)
                 is MoveResult.DuplicateCommand ->
-                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                    result.snapshot?.let { connections.sendSnapshot(gameId, connection, it) }
                 else ->
                     reject(result.rejectionCode())
             }
@@ -162,15 +163,19 @@ private suspend fun handleCommand(
                     connections.broadcast(gameId, result.snapshot.toGameFinished())
                 is MoveResult.RevisionConflict -> {
                     reject(REVISION_CONFLICT_CODE)
-                    connection.send(SnapshotEvent(result.snapshot))
+                    connections.sendSnapshot(gameId, connection, result.snapshot)
                 }
                 is MoveResult.DuplicateCommand ->
-                    result.snapshot?.let { connection.send(SnapshotEvent(it)) }
+                    result.snapshot?.let { connections.sendSnapshot(gameId, connection, it) }
                 else ->
                     reject(result.rejectionCode())
             }
         }
     }
+}
+
+private suspend fun GameConnections.sendSnapshot(gameId: UUID, connection: GameConnection, snapshot: GameSnapshot) {
+    connection.send(SnapshotEvent(snapshot, opponentConnected = isConnected(gameId, snapshot.yourColor.opponent)))
 }
 
 private fun GameSnapshot.toMoveApplied(lastMove: String) =

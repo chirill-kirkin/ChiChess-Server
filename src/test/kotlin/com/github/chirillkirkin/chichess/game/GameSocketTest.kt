@@ -18,7 +18,9 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 private const val WRONG_PROTOCOL_VERSION = 999
 
@@ -94,6 +96,88 @@ class GameSocketTest {
                 assertIs<SnapshotEvent>(receiveEvent())
             }
             assertIs<PlayerJoinedEvent>(receiveEvent())
+        }
+    }
+
+    @Test
+    fun `other participant is told when a player leaves and when they return`() = testGame { game, ws ->
+        val joiner = ws.createGuestSession()
+        ws.postJoinGame(game.inviteCode, joiner.token)
+
+        ws.gameSocket(game.gameId, game.creator.token) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            ws.gameSocket(game.gameId, joiner.token) {
+                assertIs<SnapshotEvent>(receiveEvent())
+            }
+            assertIs<PlayerJoinedEvent>(receiveEvent())
+            assertIs<PlayerLeftEvent>(receiveEvent())
+
+            ws.gameSocket(game.gameId, joiner.token) {
+                assertIs<SnapshotEvent>(receiveEvent())
+            }
+            assertIs<PlayerJoinedEvent>(receiveEvent())
+        }
+    }
+
+    @Test
+    fun `snapshot reports an opponent who has not connected yet as offline`() = testGame { game, ws ->
+        val joiner = ws.createGuestSession()
+        ws.postJoinGame(game.inviteCode, joiner.token)
+
+        ws.gameSocket(game.gameId, game.creator.token) {
+            assertFalse(assertIs<SnapshotEvent>(receiveEvent()).opponentConnected)
+        }
+    }
+
+    @Test
+    fun `snapshot reports an already connected opponent as online`() = testGame { game, ws ->
+        val joiner = ws.createGuestSession()
+        ws.postJoinGame(game.inviteCode, joiner.token)
+
+        ws.gameSocket(game.gameId, game.creator.token) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            ws.gameSocket(game.gameId, joiner.token) {
+                assertTrue(assertIs<SnapshotEvent>(receiveEvent()).opponentConnected)
+            }
+        }
+    }
+
+    @Test
+    fun `reconnecting player sees that the opponent left while they were away`() = testGame { game, ws ->
+        val joiner = ws.createGuestSession()
+        ws.postJoinGame(game.inviteCode, joiner.token)
+
+        ws.gameSocket(game.gameId, joiner.token) {
+            assertIs<SnapshotEvent>(receiveEvent())
+            ws.gameSocket(game.gameId, game.creator.token) {
+                assertIs<SnapshotEvent>(receiveEvent())
+            }
+            assertIs<PlayerJoinedEvent>(receiveEvent())
+            // Waiting for PLAYER_LEFT guarantees the server has dropped the creator before the reconnect.
+            assertIs<PlayerLeftEvent>(receiveEvent())
+        }
+        ws.gameSocket(game.gameId, joiner.token) {
+            assertFalse(assertIs<SnapshotEvent>(receiveEvent()).opponentConnected)
+        }
+    }
+
+    @Test
+    fun `request sync reports the opponent's current presence`() = testGame { game, ws ->
+        val joiner = ws.createGuestSession()
+        ws.postJoinGame(game.inviteCode, joiner.token)
+
+        ws.gameSocket(game.gameId, game.creator.token) {
+            val creatorSocket = this
+            assertIs<SnapshotEvent>(receiveEvent())
+            ws.gameSocket(game.gameId, joiner.token) {
+                assertIs<SnapshotEvent>(receiveEvent())
+                assertIs<PlayerJoinedEvent>(creatorSocket.receiveEvent())
+                creatorSocket.sendCommand(RequestSync(GAME_PROTOCOL_VERSION, SYNC_COMMAND_ID))
+                assertTrue(assertIs<SnapshotEvent>(creatorSocket.receiveEvent()).opponentConnected)
+            }
+            assertIs<PlayerLeftEvent>(receiveEvent())
+            sendCommand(RequestSync(GAME_PROTOCOL_VERSION, SYNC_COMMAND_ID))
+            assertFalse(assertIs<SnapshotEvent>(receiveEvent()).opponentConnected)
         }
     }
 
