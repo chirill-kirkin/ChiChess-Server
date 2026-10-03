@@ -95,10 +95,10 @@ class ExposedGameRepository(private val database: Database) : GameRepository {
                 val black = game[Games.blackSessionId]
                 val joinerId = joiningSessionId.toString()
 
-                // Both slots filled: the game already has two players, so nobody can join by
-                // invite — including a participant reusing the code (they reconnect by gameId).
-                // A finished game reports that distinctly so the client doesn't imply it's still on.
                 if (white != null && black != null) {
+                    if (joinerId == white || joinerId == black) {
+                        return@transaction JoinGameResult.Joined(gameId)
+                    }
                     return@transaction if (game[Games.status] == GameStatus.FINISHED.name) {
                         JoinGameResult.Finished
                     } else {

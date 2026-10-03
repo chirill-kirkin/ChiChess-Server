@@ -48,7 +48,7 @@ class GameJoiningTest {
         val response = client.postJoinGame(game.inviteCode, joiningPlayer.token)
 
         assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals(game.gameId, response.decodeJsonBody<JoinGameResponse>().gameId)
+        assertEquals(JoinGameResponse(game.gameId), response.decodeJsonBody<JoinGameResponse>())
         withDatabaseConnection(game.databaseUrl) { connection ->
             val selectJoinedGame =
                 "SELECT ${Games.whiteSessionId.name}, ${Games.blackSessionId.name}, " +
@@ -70,33 +70,44 @@ class GameJoiningTest {
     }
 
     @Test
-    fun `participant rejoining full game gets already joined`() = testGameJoining { game ->
+    fun `participant reusing invite code of full game rejoins it`() = testGameJoining { game ->
         val joiningPlayer = client.createGuestSession()
         client.postJoinGame(game.inviteCode, joiningPlayer.token)
+        val beforeRejoin = client.getGame(game.gameId, joiningPlayer.token).decodeJsonBody<GameSnapshot>()
 
         // Colors are random, so one of these two holds the white slot. Neither may be treated as
-        // "your own game": once both slots are filled the answer is always GAME_ALREADY_JOINED.
+        // "your own game": once both slots are filled a participant always gets their game back.
         val joinerRejoin = client.postJoinGame(game.inviteCode, joiningPlayer.token)
         val creatorRejoin = client.postJoinGame(game.inviteCode, game.creator.token)
 
-        assertError(joinerRejoin, HttpStatusCode.Conflict, GAME_ALREADY_JOINED_CODE)
-        assertError(creatorRejoin, HttpStatusCode.Conflict, GAME_ALREADY_JOINED_CODE)
+        val expected = JoinGameResponse(game.gameId)
+        assertEquals(HttpStatusCode.OK, joinerRejoin.status)
+        assertEquals(expected, joinerRejoin.decodeJsonBody<JoinGameResponse>())
+        assertEquals(HttpStatusCode.OK, creatorRejoin.status)
+        assertEquals(expected, creatorRejoin.decodeJsonBody<JoinGameResponse>())
+        assertEquals(beforeRejoin, client.getGame(game.gameId, joiningPlayer.token).decodeJsonBody<GameSnapshot>())
     }
 
     @Test
-    fun `joining finished game reports game finished`() = testGameJoining { game ->
+    fun `participant reusing invite code of finished game rejoins it`() = testGameJoining { game ->
         val joiningPlayer = client.createGuestSession()
         client.postJoinGame(game.inviteCode, joiningPlayer.token)
-        withDatabaseConnection(game.databaseUrl) { connection ->
-            val finishGame = "UPDATE ${Games.tableName} SET ${Games.status.name} = ? WHERE ${Games.id.name} = ?"
-            connection.prepareStatement(finishGame).use { statement ->
-                statement.setString(1, GameStatus.FINISHED.name)
-                statement.setString(2, game.gameId)
-                statement.executeUpdate()
-            }
-        }
+        finishGame(game)
 
         val response = client.postJoinGame(game.inviteCode, joiningPlayer.token)
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(JoinGameResponse(game.gameId), response.decodeJsonBody<JoinGameResponse>())
+    }
+
+    @Test
+    fun `non-participant joining finished game reports game finished`() = testGameJoining { game ->
+        val joiningPlayer = client.createGuestSession()
+        val thirdPlayer = client.createGuestSession()
+        client.postJoinGame(game.inviteCode, joiningPlayer.token)
+        finishGame(game)
+
+        val response = client.postJoinGame(game.inviteCode, thirdPlayer.token)
 
         assertError(response, HttpStatusCode.Conflict, GAME_FINISHED_CODE)
     }
@@ -119,6 +130,17 @@ class GameJoiningTest {
                 val creator = client.createGuestSession()
                 val game = client.postCreateGame(creator.token).decodeJsonBody<CreateGameResponse>()
                 test(GameFixture(game.gameId, game.inviteCode, creator, databaseUrl))
+            }
+        }
+    }
+
+    private fun finishGame(game: GameFixture) {
+        withDatabaseConnection(game.databaseUrl) { connection ->
+            val finishGame = "UPDATE ${Games.tableName} SET ${Games.status.name} = ? WHERE ${Games.id.name} = ?"
+            connection.prepareStatement(finishGame).use { statement ->
+                statement.setString(1, GameStatus.FINISHED.name)
+                statement.setString(2, game.gameId)
+                statement.executeUpdate()
             }
         }
     }
